@@ -1,0 +1,41 @@
+{
+  "name": "pi-morph-plugin",
+  "version": "0.1.0",
+  "description": "Morph tools and compaction for Pi Coding Agent with custom Morph base URL support",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi.dev",
+    "morph",
+    "plugin",
+    "extension"
+  ],
+  "main": "./extensions/morph/index.js",
+  "files": [
+    "extensions",
+    "prompts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/morph/index.js"
+    ],
+    "prompts": [
+      "./prompts/morph-tools.md"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.mjs"
+  },
+  "dependencies": {
+    "@morphllm/morphsdk": "^0.2.160"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
+  },
+  "license": "MIT"
+}
