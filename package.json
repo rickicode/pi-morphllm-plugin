@@ -1,6 +1,6 @@
 {
   "name": "pi-morphllm-plugin",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Morph runtime extension package for Pi Coding Agent with tools, hooks, and compaction",
   "type": "module",
   "author": "rickicode",

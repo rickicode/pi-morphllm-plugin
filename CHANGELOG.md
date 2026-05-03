@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-03
+
+### Changed
+- Manual `/morph-compact` now reports a clear warning when there are no older messages available to compact instead of surfacing a raw extension stack trace.
+- Added test coverage for graceful manual compaction error handling.
+- Bumped the package and internal plugin version to `0.1.6`.
+
 ## [0.1.5] - 2026-05-03
 
 ### Changed
