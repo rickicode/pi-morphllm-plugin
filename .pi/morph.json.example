@@ -1,0 +1,24 @@
+{
+  "apiKey": "sk-...",
+  "apiKeyFile": "~/.pi/agent/morph.txt",
+  "apiKeyStrategy": "round-robin",
+  "baseUrl": "https://api.morphllm.com",
+  "editEnabled": true,
+  "warpgrepEnabled": true,
+  "warpgrepGithubEnabled": true,
+  "compactEnabled": true,
+  "allowReadonlyAgents": false,
+  "routing": {
+    "editMode": "force",
+    "codebaseSearchMode": "force",
+    "githubSearchMode": "force",
+    "fallbackToNativeTools": true,
+    "forceMorphCompactCommand": true
+  },
+  "compactContextThreshold": 0.7,
+  "compactPreserveRecent": 1,
+  "compactRatio": 0.3,
+  "timeoutMs": 30000,
+  "warpGrepTimeoutMs": 60000,
+  "compactTimeoutMs": 60000
+}

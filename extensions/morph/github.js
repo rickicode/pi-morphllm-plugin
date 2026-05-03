@@ -7,7 +7,7 @@ const GITHUB_OWNER_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 function githubHeaders() {
 	return {
 		Accept: "application/vnd.github+json",
-		"User-Agent": "pi-morph-plugin",
+		"User-Agent": "pi-morphllm-plugin",
 	};
 }
 

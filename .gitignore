@@ -1,7 +1,9 @@
 node_modules/
-.pi/
+#.pi/
 !.pi/morph.json.example
 .pi-lens/
 *.log
 coverage/
 .DS_Store
+*.tgz
+npm-debug.log*

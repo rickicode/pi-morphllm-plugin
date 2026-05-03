@@ -6,8 +6,10 @@ import { Type } from "typebox";
 import {
 	DEFAULT_MORPH_BASE_URL,
 	EXISTING_CODE_MARKER,
+	ensureMorphConfigFile,
 	getMorphConfig,
 	READONLY_AGENTS,
+	saveMorphConfig,
 } from "./config.js";
 import {
 	fetchGitHubRepoSuggestions,
@@ -27,8 +29,40 @@ import {
 
 const PLUGIN_VERSION = "0.1.0";
 
+function createApiKeySelector(config) {
+	const apiKeys = config.apiKeys || [];
+	let roundRobinIndex = 0;
+
+	return () => {
+		if (apiKeys.length === 0) return null;
+		if (apiKeys.length === 1) return apiKeys[0];
+		if (config.apiKeyStrategy === "random") {
+			const index = Math.floor(Math.random() * apiKeys.length);
+			return apiKeys[index];
+		}
+		const apiKey = apiKeys[roundRobinIndex % apiKeys.length];
+		roundRobinIndex += 1;
+		return apiKey;
+	};
+}
+
+function createRotatingMorphClient(ClientClass, buildOptions, selectApiKey) {
+	return new Proxy(
+		{},
+		{
+			get(_target, prop) {
+				const apiKey = selectApiKey();
+				if (!apiKey) return undefined;
+				const client = new ClientClass(buildOptions(apiKey));
+				const value = client[prop];
+				return typeof value === "function" ? value.bind(client) : value;
+			},
+		},
+	);
+}
+
 async function createClients(config) {
-	if (!config.apiKey) {
+	if (!config.apiKeys?.length) {
 		return { morph: null, warpGrep: null, compact: null, loadError: null };
 	}
 
@@ -36,23 +70,37 @@ async function createClients(config) {
 		const { CompactClient, MorphClient, WarpGrepClient } = await import(
 			"@morphllm/morphsdk"
 		);
+		const selectApiKey = createApiKeySelector(config);
 
 		return {
-			morph: new MorphClient({
-				apiKey: config.apiKey,
-				timeout: config.timeoutMs,
-			}),
-			warpGrep: new WarpGrepClient({
-				morphApiKey: config.apiKey,
-				morphApiUrl: config.baseUrl,
-				timeout: config.warpGrepTimeoutMs,
-			}),
-			compact: new CompactClient({
-				morphApiKey: config.apiKey,
-				morphApiUrl: config.baseUrl,
-				timeout: config.compactTimeoutMs,
-			}),
+			morph: createRotatingMorphClient(
+				MorphClient,
+				(apiKey) => ({
+					apiKey,
+					timeout: config.timeoutMs,
+				}),
+				selectApiKey,
+			),
+			warpGrep: createRotatingMorphClient(
+				WarpGrepClient,
+				(apiKey) => ({
+					morphApiKey: apiKey,
+					morphApiUrl: config.baseUrl,
+					timeout: config.warpGrepTimeoutMs,
+				}),
+				selectApiKey,
+			),
+			compact: createRotatingMorphClient(
+				CompactClient,
+				(apiKey) => ({
+					morphApiKey: apiKey,
+					morphApiUrl: config.baseUrl,
+					timeout: config.compactTimeoutMs,
+				}),
+				selectApiKey,
+			),
 			loadError: null,
+			selectApiKey,
 		};
 	} catch (error) {
 		return {
@@ -60,18 +108,29 @@ async function createClients(config) {
 			warpGrep: null,
 			compact: null,
 			loadError: error instanceof Error ? error.message : String(error),
+			selectApiKey: () => null,
 		};
 	}
+}
+
+function truncatePreview(text, maxLength = 96) {
+	const normalized = String(text || "").replace(/\s+/g, " ").trim();
+	if (!normalized) return "";
+	if (normalized.length <= maxLength) return normalized;
+	return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
 function renderMorphCall(label, args, theme) {
 	const path =
 		args?.target_filepath || args?.owner_repo || args?.github_url || "...";
-	return new Text(
+	const instructions = truncatePreview(args?.instructions);
+	const lines = [
 		`${theme.fg("toolTitle", theme.bold(`${label} `))}${theme.fg("accent", path)}`,
-		0,
-		0,
-	);
+	];
+	if (instructions) {
+		lines.push(theme.fg("dim", instructions));
+	}
+	return new Text(lines.join("\n"), 0, 0);
 }
 
 function summarizeResultText(result) {
@@ -80,6 +139,53 @@ function summarizeResultText(result) {
 		.map((item) => item.text || "")
 		.join("\n")
 		.trim();
+}
+
+function formatUdiffPreview(udiff, theme, expanded) {
+	if (!udiff) return "";
+
+	const lines = udiff.split("\n");
+	const maxLines = expanded ? 28 : 10;
+	const rendered = [];
+	let shown = 0;
+
+	for (const line of lines) {
+		if (shown >= maxLines) break;
+		if (!expanded && (line.startsWith("--- ") || line.startsWith("+++ "))) {
+			continue;
+		}
+
+		if (line.startsWith("@@")) {
+			rendered.push(theme.fg("warning", line));
+			shown += 1;
+			continue;
+		}
+		if (line.startsWith("+") && !line.startsWith("+++")) {
+			rendered.push(theme.fg("success", `+ ${line.slice(1)}`));
+			shown += 1;
+			continue;
+		}
+		if (line.startsWith("-") && !line.startsWith("---")) {
+			rendered.push(theme.fg("error", `- ${line.slice(1)}`));
+			shown += 1;
+			continue;
+		}
+		if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+			rendered.push(theme.fg("accent", line));
+			shown += 1;
+			continue;
+		}
+		rendered.push(
+			theme.fg("text", `  ${line.startsWith(" ") ? line.slice(1) : line}`),
+		);
+		shown += 1;
+	}
+
+	if (lines.length > shown) {
+		rendered.push(theme.fg("dim", `... ${lines.length - shown} more diff lines`));
+	}
+
+	return rendered.join("\n");
 }
 
 function formatResultHeadline(result, options) {
@@ -104,20 +210,36 @@ function renderMorphResult(result, options, theme) {
 		return new Text(theme.fg("warning", "Morph working..."), 0, 0);
 	}
 
+	const details = result.details || {};
 	const summary = summarizeResultText(result);
 	const headline = formatResultHeadline(result, options);
 	const tone = options.isError ? "error" : "success";
-	const preview = summary
+	const instruction = truncatePreview(details.instruction || details.instructions);
+	const stats =
+		Number.isFinite(details.linesAdded) || Number.isFinite(details.linesRemoved)
+			? `+${details.linesAdded || 0} -${details.linesRemoved || 0} ~${details.linesModified || 0}${details.dryRun ? " dry run" : " applied"}`
+			: details.dryRun
+				? "dry run"
+				: "";
+	const fallbackPreview = summary
 		? summary
 				.split("\n")
 				.slice(0, options.expanded ? 8 : 3)
 				.join("\n")
 		: "Morph completed";
-	const body = [
-		theme.fg(tone, headline),
-		theme.fg(options.isError ? "muted" : "text", preview),
-	].join("\n");
-	return new Text(body, 0, 0);
+	const body = [theme.fg(tone, headline)];
+	if (instruction) {
+		body.push(theme.fg("dim", instruction));
+	}
+	if (stats) {
+		body.push(theme.fg(options.isError ? "muted" : "success", stats));
+	}
+	if (details.udiff) {
+		body.push(formatUdiffPreview(details.udiff, theme, options.expanded));
+	} else {
+		body.push(theme.fg(options.isError ? "muted" : "text", fallbackPreview));
+	}
+	return new Text(body.join("\n"), 0, 0);
 }
 
 function textResult(text, details = {}) {
@@ -137,6 +259,15 @@ function errorResult(text, details = {}) {
 
 async function readFile(fsPath) {
 	return await readFileFs(fsPath, "utf8");
+}
+
+async function pathExists(fsPath) {
+	try {
+		await readFileFs(fsPath);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function resolvePath(ctx, targetPath) {
@@ -185,32 +316,34 @@ function serializeMessageContent(content) {
 	return JSON.stringify(content);
 }
 
-function buildClientUnavailableError(clients) {
+function buildClientUnavailableError(clients, fallbackHint) {
 	if (clients.loadError) {
-		return `Morph SDK unavailable: ${clients.loadError}`;
+		return `Morph SDK unavailable: ${clients.loadError}${fallbackHint ? ` Fallback: ${fallbackHint}` : ""}`;
 	}
-	return "MORPH_API_KEY not configured.";
+	return `MORPH_API_KEY not configured.${fallbackHint ? ` Fallback: ${fallbackHint}` : ""}`;
 }
 
-function buildMorphEditTool(config, clients) {
+function buildMorphFastApplyTool(config, clients) {
 	const description = appendRuntimeNotes(
-		`Edit existing files using partial code snippets with "${EXISTING_CODE_MARKER}" markers. Morph merges your changes into the full file.`,
-		buildToolRuntimeNotes("morph_edit", config),
+		`Edit existing files using partial code snippets with "${EXISTING_CODE_MARKER}" markers. Morph merges your changes into the full file and supports dry-run previews.`,
+		buildToolRuntimeNotes("morph_fastapply", config),
 	);
 
 	return {
-		name: "morph_edit",
-		label: "Morph Edit",
+		name: "morph_fastapply",
+		label: "Morph FastApply",
 		description,
 		promptSnippet:
 			"Fast apply for large or scattered edits using lazy existing-code markers.",
 		promptGuidelines: [
-			"Use morph_edit for large files, multiple scattered edits, or whitespace-sensitive merges.",
-			"Use morph_edit with // ... existing code ... markers around unchanged regions.",
+			"Use morph_fastapply for large files, multiple scattered edits, or whitespace-sensitive merges.",
+			"Use morph_fastapply with // ... existing code ... markers around unchanged regions.",
+			"Use dry_run when you want a preview of the merge and diff before writing the file.",
+			"If morph_fastapply fails or is unavailable, fall back to native edit for exact replacements or write for new files.",
 		],
 		parameters: Type.Object({
 			target_filepath: Type.String({
-				description: "Path of the file to modify",
+				description: "Path of the existing file to modify",
 			}),
 			instructions: Type.String({
 				description:
@@ -220,24 +353,37 @@ function buildMorphEditTool(config, clients) {
 				description:
 					'Code changes wrapped with "// ... existing code ..." markers for unchanged sections',
 			}),
+			dry_run: Type.Optional(
+				Type.Boolean({
+					description: "Preview the Morph merge without writing the file.",
+				}),
+			),
 		}),
 		renderCall(args, theme) {
-			return renderMorphCall("morph_edit", args, theme);
+			return renderMorphCall("morph_fastapply", args, theme);
 		},
 		renderResult(result, options, theme) {
 			return renderMorphResult(result, options, theme);
 		},
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (isReadonlyAgent(ctx, config)) {
-				return errorResult("morph_edit is blocked in readonly agents.");
+				return errorResult(
+					"morph_fastapply is blocked in readonly agents. Fallback: use native edit for exact replacements or write for new files.",
+				);
 			}
 
 			if (!config.apiKey || !clients.morph) {
-				return errorResult(buildClientUnavailableError(clients));
+				return errorResult(
+					buildClientUnavailableError(
+						clients,
+						"use native edit for exact replacements or write for new files.",
+					),
+				);
 			}
 
 			const normalizedCodeEdit = normalizeCodeEditInput(params.code_edit);
 			const absolutePath = resolvePath(ctx, params.target_filepath);
+			const dryRun = Boolean(params.dry_run);
 
 			return withFileMutationQueue(absolutePath, async () => {
 				let originalCode = "";
@@ -250,15 +396,18 @@ function buildMorphEditTool(config, clients) {
 				}
 
 				if (!exists) {
-					if (!normalizedCodeEdit.includes(EXISTING_CODE_MARKER)) {
-						await writeFile(absolutePath, normalizedCodeEdit, "utf8");
-						return textResult(`Created new file: ${params.target_filepath}`, {
-							created: true,
-							path: params.target_filepath,
-						});
-					}
 					return errorResult(
-						`File not found: ${params.target_filepath}. New files must not use ${EXISTING_CODE_MARKER} markers.`,
+						`File not found: ${params.target_filepath}. Use native write for new files.`,
+					);
+				}
+
+				const originalLineCount = originalCode.length === 0 ? 0 : originalCode.split("\n").length;
+				if (
+					originalLineCount > 10 &&
+					!normalizedCodeEdit.includes(EXISTING_CODE_MARKER)
+				) {
+					return errorResult(
+						`Missing ${EXISTING_CODE_MARKER} markers for existing ${originalLineCount}-line file: ${params.target_filepath}. Fallback: use native edit for small exact replacements or add marker-wrapped context for morph_fastapply.`,
 					);
 				}
 
@@ -277,7 +426,7 @@ function buildMorphEditTool(config, clients) {
 
 				if (!result.success || !result.mergedCode) {
 					return errorResult(
-						`Morph API failed: ${result.error || "unknown error"}`,
+						`Morph API failed: ${result.error || "unknown error"}. Fallback: use native edit for exact replacements or write for new files.`,
 					);
 				}
 
@@ -287,18 +436,25 @@ function buildMorphEditTool(config, clients) {
 					result.mergedCode.includes(EXISTING_CODE_MARKER)
 				) {
 					return errorResult(
-						"Morph API produced unsafe output containing placeholder markers.",
+						"Morph API produced unsafe output containing placeholder markers. Fallback: use native edit for exact replacements.",
 					);
 				}
 
-				await writeFile(absolutePath, result.mergedCode, "utf8");
+				if (!dryRun) {
+					await writeFile(absolutePath, result.mergedCode, "utf8");
+				}
 				return textResult(
-					`Applied edit to ${params.target_filepath}\n\n+${result.changes.linesAdded} -${result.changes.linesRemoved} lines`,
+					`${dryRun ? "Previewed" : "Applied"} edit to ${params.target_filepath}\n\n+${result.changes.linesAdded} -${result.changes.linesRemoved} ~${result.changes.linesModified} lines${result.udiff ? `\n\n${result.udiff}` : ""}`,
 					{
 						path: params.target_filepath,
+						instruction: params.instructions,
+						dryRun,
 						linesAdded: result.changes.linesAdded,
 						linesRemoved: result.changes.linesRemoved,
+						linesModified: result.changes.linesModified,
 						udiff: result.udiff,
+						originalCode,
+						mergedCode: result.mergedCode,
 						provider: "morph",
 						baseUrl: config.baseUrl,
 					},
@@ -319,6 +475,7 @@ function buildWarpGrepTool(config, clients) {
 		promptSnippet: "Exploratory local codebase search using Morph WarpGrep.",
 		promptGuidelines: [
 			"Use warpgrep_codebase_search for exploratory questions about how the current codebase works.",
+			"If warpgrep_codebase_search fails or is unavailable, fall back to bash with rg and then read matching files.",
 		],
 		parameters: Type.Object({
 			search_term: Type.String({
@@ -334,7 +491,12 @@ function buildWarpGrepTool(config, clients) {
 		},
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!config.apiKey || !clients.warpGrep) {
-				return errorResult(buildClientUnavailableError(clients));
+				return errorResult(
+					buildClientUnavailableError(
+						clients,
+						"use bash with rg and then read matching files.",
+					),
+				);
 			}
 
 			try {
@@ -358,7 +520,9 @@ function buildWarpGrepTool(config, clients) {
 					baseUrl: config.baseUrl,
 				});
 			} catch (error) {
-				return errorResult(`WarpGrep search failed: ${error.message}`);
+				return errorResult(
+					`WarpGrep search failed: ${error.message}. Fallback: use bash with rg and then read matching files.`,
+				);
 			}
 		},
 	};
@@ -375,6 +539,7 @@ function buildWarpGrepGithubTool(config, clients) {
 		promptSnippet: "Public GitHub source search using Morph WarpGrep.",
 		promptGuidelines: [
 			"Use warpgrep_github_search for public GitHub source questions about external libraries or SDKs.",
+			"If warpgrep_github_search fails or is unavailable, fall back to GitHub search/file tools or web search.",
 		],
 		parameters: Type.Object({
 			search_term: Type.String({
@@ -401,7 +566,12 @@ function buildWarpGrepGithubTool(config, clients) {
 		},
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			if (!config.apiKey || !clients.warpGrep) {
-				return errorResult(buildClientUnavailableError(clients));
+				return errorResult(
+					buildClientUnavailableError(
+						clients,
+						"use GitHub search/file tools or web search.",
+					),
+				);
 			}
 
 			const locator = resolvePublicRepoLocator(params);
@@ -457,11 +627,11 @@ function buildWarpGrepGithubTool(config, clients) {
 					params.search_term,
 				).catch(() => []);
 				return errorResult(
-					formatPublicRepoResolutionFailure(
+					`${formatPublicRepoResolutionFailure(
 						locator.repo,
 						error.message,
 						suggestions,
-					),
+					)}\n\nFallback: use GitHub search/file tools or web search.`,
 				);
 			}
 		},
@@ -482,7 +652,9 @@ async function runMorphCompaction(
 	config,
 	clients,
 	modelContextTokens,
+	options = {},
 ) {
+	const force = options.force === true;
 	if (!config.compactEnabled || !config.apiKey || !clients.compact) return;
 
 	const messages = event.branchEntries
@@ -490,7 +662,7 @@ async function runMorphCompaction(
 		.map((entry) => entry.message);
 
 	const charThreshold = compactThresholdToChars(config, modelContextTokens);
-	if (estimateCharsFromMessages(messages) < charThreshold) {
+	if (!force && estimateCharsFromMessages(messages) < charThreshold) {
 		return;
 	}
 
@@ -535,10 +707,25 @@ async function runMorphCompaction(
 	}
 }
 
-function createMorphCompactHandler() {
+function shouldForceMorphEdit(config) {
+	return config.routing?.editMode === "force";
+}
+
+function shouldForceCodebaseSearch(config) {
+	return config.routing?.codebaseSearchMode === "force";
+}
+
+function shouldForceGithubSearch(config) {
+	return config.routing?.githubSearchMode === "force";
+}
+
+function createMorphCompactHandler(forceMorphCompactRef, config) {
 	return async (_args, ctx) => {
+		forceMorphCompactRef.value =
+			config.routing?.forceMorphCompactCommand !== false;
 		ctx.compact({
 			onComplete: (result) => {
+				forceMorphCompactRef.value = false;
 				if (!ctx.hasUI) return;
 				const summary = result.summary || "Compaction finished.";
 				ctx.ui.notify(
@@ -547,24 +734,127 @@ function createMorphCompactHandler() {
 				);
 			},
 			onError: (error) => {
+				forceMorphCompactRef.value = false;
 				if (!ctx.hasUI) return;
 				ctx.ui.notify(`Morph compact failed: ${error.message}`, "warning");
 			},
 		});
 		if (ctx.hasUI) {
-			ctx.ui.notify("Triggered compaction for the current session.", "info");
+			ctx.ui.notify(
+				config.routing?.forceMorphCompactCommand !== false
+					? "Triggered Morph compaction for the current session."
+					: "Triggered Pi compaction with Morph auto-compaction rules for the current session.",
+				"info",
+			);
 		}
 	};
 }
 
+function formatApiKeySource(config) {
+	if (config.apiKeys?.length > 1) {
+		return `${config.apiKeys.length} keys (${config.apiKeyStrategy})`;
+	}
+	if (config.apiKeys?.length === 1) {
+		return "single key";
+	}
+	if (config.apiKeyFile) {
+		return `key file: ${config.apiKeyFile}`;
+	}
+	return "none";
+}
+
+function formatMorphFooterStatus(config) {
+	const keyCount = config.apiKeys?.length || 0;
+	if (keyCount === 1) return "MorphLLM (1 key)";
+	if (keyCount > 1) {
+		return `MorphLLM (${keyCount} keys, ${config.apiKeyStrategy})`;
+	}
+	return "MorphLLM (0 keys)";
+}
+
+function buildStatusLines(config, clients, configFile) {
+	return [
+		`Morph config: ${config.configPath || configFile.path || "none"}`,
+		`Morph config auto-created: ${Boolean(configFile.created)}`,
+		`Morph API key: ${config.apiKey ? "configured" : "missing"}`,
+		`Morph API key source: ${formatApiKeySource(config)}`,
+		`Morph SDK: ${clients.loadError ? `unavailable (${clients.loadError})` : "ready"}`,
+		`Morph base URL: ${config.baseUrl}`,
+		`Morph FastApply enabled: ${config.fastApplyEnabled}`,
+		`WarpGrep enabled: ${config.warpgrepEnabled}`,
+		`WarpGrep GitHub enabled: ${config.warpgrepGithubEnabled}`,
+		`Compaction enabled: ${config.compactEnabled}`,
+		`Readonly agents allowed: ${config.allowReadonlyAgents}`,
+		`Routing edit mode: ${config.routing?.editMode || "strong"}`,
+		`Routing codebase search mode: ${config.routing?.codebaseSearchMode || "prefer"}`,
+		`Routing GitHub search mode: ${config.routing?.githubSearchMode || "prefer"}`,
+		`Morph FastApply-first guidance active: ${config.routing?.editMode === "force"}`,
+		`Morph-first local search guidance active: ${config.routing?.codebaseSearchMode === "force"}`,
+		`Morph-first GitHub search guidance active: ${config.routing?.githubSearchMode === "force"}`,
+		`Fallback to native tools: ${config.routing?.fallbackToNativeTools !== false}`,
+		`Force /morph-compact: ${config.routing?.forceMorphCompactCommand !== false}`,
+	];
+}
+
+function formatStatusMessage(lines) {
+	return `Morph status\n${lines.map((line) => `- ${line}`).join("\n")}`;
+}
+
+async function updateMorphSettingInteractively(ctx, cwd) {
+	const choice = await ctx.ui.select("Morph settings", [
+		"Routing edit mode",
+		"Routing codebase search mode",
+		"Routing GitHub search mode",
+		"Fallback to native tools",
+		"Force /morph-compact",
+	]);
+	if (!choice) return null;
+
+	if (choice === "Fallback to native tools") {
+		const next = await ctx.ui.select("Fallback to native tools", ["true", "false"]);
+		if (!next) return null;
+		const path = saveMorphConfig(
+			{ routing: { fallbackToNativeTools: next === "true" } },
+			cwd,
+		);
+		return `Updated ${path}: routing.fallbackToNativeTools = ${next}`;
+	}
+
+	if (choice === "Force /morph-compact") {
+		const next = await ctx.ui.select("Force /morph-compact", ["true", "false"]);
+		if (!next) return null;
+		const path = saveMorphConfig(
+			{ routing: { forceMorphCompactCommand: next === "true" } },
+			cwd,
+		);
+		return `Updated ${path}: routing.forceMorphCompactCommand = ${next}`;
+	}
+
+	const next = await ctx.ui.select(choice, ["prefer", "strong", "force"]);
+	if (!next) return null;
+	const key =
+		choice === "Routing edit mode"
+			? "editMode"
+			: choice === "Routing codebase search mode"
+				? "codebaseSearchMode"
+				: "githubSearchMode";
+	const path = saveMorphConfig({ routing: { [key]: next } }, cwd);
+	return `Updated ${path}: routing.${key} = ${next}`;
+}
+
 export default async function morphExtension(pi) {
+	const configFile = ensureMorphConfigFile();
 	const config = getMorphConfig();
 	const clients = await createClients(config);
 	let modelContextTokens = 200000;
-	const morphCompactHandler = createMorphCompactHandler();
+	const forceMorphCompactRef = { value: false };
+	const morphCompactHandler = createMorphCompactHandler(
+		forceMorphCompactRef,
+		config,
+	);
 
 	if (config.fastApplyEnabled) {
-		pi.registerTool(buildMorphEditTool(config, clients));
+		pi.registerTool(buildMorphFastApplyTool(config, clients));
 	}
 	if (config.warpgrepEnabled) {
 		pi.registerTool(buildWarpGrepTool(config, clients));
@@ -575,7 +865,10 @@ export default async function morphExtension(pi) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (ctx.hasUI) {
-			ctx.ui.setStatus("morph", `Morph ${PLUGIN_VERSION} @ ${config.baseUrl}`);
+			ctx.ui.setStatus("morph", formatMorphFooterStatus(config));
+			if (configFile.created && configFile.path) {
+				ctx.ui.notify(`Created Morph config at ${configFile.path}`, "info");
+			}
 		}
 	});
 
@@ -587,7 +880,7 @@ export default async function morphExtension(pi) {
 
 	pi.on("before_agent_start", async (event) => {
 		const hint = buildMorphSystemRoutingHint(config);
-		if (!hint || event.systemPrompt.includes(hint)) {
+		if (!hint || event.systemPrompt.includes("Morph plugin routing hints:")) {
 			return;
 		}
 		return {
@@ -596,7 +889,7 @@ export default async function morphExtension(pi) {
 	});
 
 	pi.on("tool_call", async (event) => {
-		if (event.toolName === "morph_edit") {
+		if (event.toolName === "morph_fastapply") {
 			event.input.code_edit = normalizeCodeEditInput(
 				event.input.code_edit || "",
 			);
@@ -606,7 +899,7 @@ export default async function morphExtension(pi) {
 	pi.on("tool_result", async (event) => {
 		if (
 			![
-				"morph_edit",
+				"morph_fastapply",
 				"warpgrep_codebase_search",
 				"warpgrep_github_search",
 			].includes(event.toolName)
@@ -628,13 +921,16 @@ export default async function morphExtension(pi) {
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
+		const forceMorphCompact = forceMorphCompactRef.value;
 		const result = await runMorphCompaction(
 			event,
 			ctx,
 			config,
 			clients,
 			modelContextTokens,
+			{ force: forceMorphCompact },
 		);
+		forceMorphCompactRef.value = false;
 		if (!result) return;
 		return {
 			compaction: result.compaction,
@@ -644,25 +940,36 @@ export default async function morphExtension(pi) {
 	pi.registerCommand("morph_status", {
 		description: "Show Morph plugin configuration status",
 		handler: async (_args, ctx) => {
-			const lines = [
-				`Morph config: ${config.configPath || "none"}`,
-				`Morph API key: ${config.apiKey ? "configured" : "missing"}`,
-				`Morph SDK: ${clients.loadError ? `unavailable (${clients.loadError})` : "ready"}`,
-				`Morph base URL: ${config.baseUrl}`,
-				`Morph edit: ${config.fastApplyEnabled}`,
-				`WarpGrep: ${config.warpgrepEnabled}`,
-				`WarpGrep GitHub: ${config.warpgrepGithubEnabled}`,
-				`Compaction: ${config.compactEnabled}`,
-			];
+			const lines = buildStatusLines(config, clients, configFile);
+			const message = formatStatusMessage(lines);
 			if (ctx.hasUI) {
-				ctx.ui.notify(lines.join(" | "), "info");
+				ctx.ui.notify(message, "info");
+			}
+		},
+	});
+
+	pi.registerCommand("morph_settings", {
+		description: "Interactively update Morph routing settings",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				return;
+			}
+			const result = await updateMorphSettingInteractively(ctx, process.cwd());
+			if (result) {
+				ctx.ui.notify(result, "info");
+				ctx.ui.notify(
+					"Restart or reload the extension/session to pick up updated Morph settings and refresh Morph clients if credentials or key files changed.",
+					"info",
+				);
 			}
 		},
 	});
 
 	pi.registerCommand("morph-compact", {
 		description:
-			"Trigger Pi compaction immediately with Morph compaction integration enabled",
+			config.routing?.forceMorphCompactCommand !== false
+				? "Trigger Pi compaction immediately and force the Morph compaction path"
+				: "Trigger Pi compaction immediately with Morph auto-compaction integration enabled",
 		handler: morphCompactHandler,
 	});
 }
