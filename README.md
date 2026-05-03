@@ -213,6 +213,10 @@ Example `/morph_status` fields:
 - In `strong` mode, the extension strongly prefers Morph tools for suitable cases.
 - In `prefer` mode, the extension gives a softer recommendation without changing tool availability.
 
+Example `morph_fastapply` diff preview:
+
+![Morph FastApply preview](images/fastapply.png)
+
 Example `morph_fastapply` preview call:
 
 ```json
