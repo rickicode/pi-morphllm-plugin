@@ -1,5 +1,9 @@
 # pi-morphllm-plugin
 
+<p align="center">
+  <img src="./images/morph-plugin-icon.svg" alt="Pi Morph plugin icon" width="160" height="160" />
+</p>
+
 Pi runtime extension package for Morph tools and compaction, using file-based configuration for consistent setup.
 
 Made by rickicode.
@@ -166,7 +170,7 @@ Invalid routing mode strings automatically fall back to safe defaults:
 
 Example `/morph_status` fields:
 
-- `Morph plugin version: 0.1.4`
+- `Morph plugin version: 0.1.6`
 - `Morph config: ~/.pi/agent/morph.json`
 - `Morph API key: configured`
 - `Morph API key source: single key`, `3 keys (round-robin)`, or `key file: ~/.pi/agent/morph.env` depending on your configuration

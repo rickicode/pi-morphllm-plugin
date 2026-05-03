@@ -1,0 +1,33 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="72" y1="56" x2="440" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#04070D"/>
+    </linearGradient>
+    <linearGradient id="strokeA" x1="120" y1="120" x2="392" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8BF3FF"/>
+      <stop offset="0.52" stop-color="#4EDCFF"/>
+      <stop offset="1" stop-color="#2D7DFF"/>
+    </linearGradient>
+    <linearGradient id="strokeB" x1="392" y1="120" x2="120" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D5FBFF"/>
+      <stop offset="0.48" stop-color="#77E8FF"/>
+      <stop offset="1" stop-color="#345BFF"/>
+    </linearGradient>
+    <filter id="glow" x="66" y="86" width="380" height="340" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+      <feGaussianBlur stdDeviation="14" result="effect1_foregroundBlur"/>
+    </filter>
+  </defs>
+
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#bg)"/>
+  <rect x="44" y="44" width="424" height="424" rx="100" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
+  <circle cx="148" cy="144" r="78" fill="#7EEBFF" fill-opacity="0.1"/>
+  <circle cx="368" cy="362" r="96" fill="#295CFF" fill-opacity="0.12"/>
+
+  <g filter="url(#glow)">
+    <path d="M126 348L126 164C126 149.641 137.641 138 152 138H166.5C175.613 138 184.097 142.76 188.867 150.555L256 260.25L323.133 150.555C327.903 142.76 336.387 138 345.5 138H360C374.359 138 386 149.641 386 164V348" stroke="url(#strokeA)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M169 344V219L234.398 325.75C244.334 341.968 267.666 341.968 277.602 325.75L343 219V344" stroke="url(#strokeB)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

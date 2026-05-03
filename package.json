@@ -27,6 +27,7 @@
   "files": [
     "extensions",
     "prompts",
+    "images",
     "README.md"
   ],
   "pi": {
