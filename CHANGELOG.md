@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-03
+
+### Changed
+- Auto-create or update `~/.pi/agent/AGENTS.md` with a dedicated Morph FastApply instruction block so existing-file edits default to `morph_fastapply` guidance without duplicating the prompt.
+- Simplified `prompts/morph-tools.md` so it stays a lightweight package prompt and avoids overlapping with global AGENTS policy and runtime routing hints.
+- Refined `README.md` to explain more clearly what the plugin is for, when to use it, and how Morph integration behaves inside Pi.
+- Bumped the package and internal plugin version to `0.1.7`.
+
 ## [0.1.6] - 2026-05-03
 
 ### Changed

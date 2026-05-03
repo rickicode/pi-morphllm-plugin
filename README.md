@@ -4,11 +4,35 @@
   <img src="./images/morph-plugin-icon.svg" alt="Pi Morph plugin icon" width="160" height="160" />
 </p>
 
-Pi runtime extension package for Morph tools and compaction, using file-based configuration for consistent setup.
+Pi runtime extension package that integrates Morph into Pi as real tools, commands, hooks, and compaction behavior, with file-based configuration for consistent setup.
 
-Made by rickicode.
+This package is not just a prompt snippet or a thin skill wrapper. It installs as a normal Pi package and runs an active extension that registers Morph tools, lifecycle hooks, status commands, and Morph-first routing guidance.
 
-This package is intentionally not a thin skill-only package. It installs as a normal Pi package, then runs an active extension that registers Morph tools, commands, lifecycle hooks, and compaction behavior.
+## What This Plugin Does
+
+`pi-morphllm-plugin` makes Morph a practical part of everyday Pi coding sessions.
+
+Use it when you want Pi to:
+
+- apply larger or multi-location edits through `morph_fastapply`
+- search the current workspace with natural language through `warpgrep_codebase_search`
+- inspect public GitHub repositories through `warpgrep_github_search`
+- compact long conversations with Morph before falling back to Pi
+- keep Morph configuration in one JSON file instead of scattered runtime environment variables
+
+In short, this plugin turns Morph into a real Pi runtime integration instead of a manual workflow.
+
+## When To Use It
+
+This plugin is a good fit if you use Pi regularly and want Morph to be part of your default workflow, especially for:
+
+- refactoring or editing larger files safely
+- searching unfamiliar codebases with natural language
+- inspecting public GitHub repositories without cloning them locally
+- reducing long session context with Morph compaction
+- standardizing Morph setup across projects with file-based config
+
+If you only need a one-off note about Morph or a manual prompt pattern, this package is probably more than you need.
 
 ## Features
 
@@ -22,7 +46,7 @@ This package is intentionally not a thin skill-only package. It installs as a no
 
 ## Install
 
-### Install from npm
+### From npm
 
 ```bash
 pi install npm:pi-morphllm-plugin
@@ -30,7 +54,7 @@ pi install npm:pi-morphllm-plugin
 
 This is the main installation path and does not require cloning the repository.
 
-### Try for the current run only
+### For the current run only
 
 ```bash
 pi -e npm:pi-morphllm-plugin
@@ -38,9 +62,7 @@ pi -e npm:pi-morphllm-plugin
 
 This loads the package temporarily for the current Pi run without adding it to your installed package list.
 
-### Local development
-
-If you are working on the package itself, clone the repository and run:
+### For local development
 
 ```bash
 pi -e .
@@ -67,17 +89,16 @@ Pi Morph uses guidance, not runtime blocking.
 
 ## Config
 
-The easiest setup is a JSON file.
+Pi Morph uses JSON config files only.
 
-Pi Morph looks for config in this order:
+Config lookup order:
 
 - `~/.pi/agent/morph.json` as the default global Pi config
 - `.pi/morph.json` in the current project
 - `morph.config.json` in the current project
 
-The recommended setup is global package-style config in `~/.pi/agent/morph.json`.
-Pi Morph auto-creates that global file on first runtime load when no existing Morph config is found.
-Installing the package alone does not create the file; the extension must actually be loaded by Pi.
+The recommended setup is global config in `~/.pi/agent/morph.json`.
+Pi Morph auto-creates that file on first runtime load when no existing Morph config is found. Installing the package alone does not create it; the extension must actually be loaded by Pi.
 
 A repo example is available at `.pi/morph.json.example`.
 You can also create the global config manually:
@@ -115,7 +136,7 @@ Example config:
 
 ### Multiple API keys
 
-Pi Morph also supports key rotation across multiple Morph API keys.
+Pi Morph also supports rotation across multiple Morph API keys.
 Set `apiKey` to `"multiple"`, point `apiKeyFile` at a text file, and choose an `apiKeyStrategy`.
 Only add `baseUrl` when you want to use a custom Morph-compatible endpoint.
 
@@ -158,19 +179,18 @@ Invalid routing mode strings automatically fall back to safe defaults:
 - `routing.codebaseSearchMode` -> `force`
 - `routing.githubSearchMode` -> `force`
 
-
 ## Commands
 
-- `/morph_status` shows the loaded config path, API key status, runs a live Morph API probe with the configured key, shows SDK status, base URL, feature flags, routing mode state, and whether Morph-first guidance is active.
+- `/morph_status` shows the loaded config path, API key status, live API probe result, SDK status, base URL, feature flags, routing mode state, and whether Morph-first guidance is active.
 - `/morph_settings` opens a simple interactive menu for updating routing settings in `morph.json`.
-- `/morph_selftest` runs real Morph self-tests against FastApply, local WarpGrep, GitHub WarpGrep, compact, and the live API probe using temporary files and sample queries. The GitHub check is stricter and verifies that package metadata is actually found in a public repository result.
-- Auto compaction is Morph-first when `autoCompactEnabled` is enabled: when Pi triggers compaction automatically, this plugin tries Morph compaction first and only falls back to Pi compaction if Morph is unavailable or cannot produce a result.
+- `/morph_selftest` runs end-to-end checks for the API probe, FastApply, local WarpGrep, GitHub WarpGrep, and compact using temporary files and sample queries.
+- `/morph-compact` is explicit and Morph-only: the manual command requires Morph compaction and reports a clear warning when compaction cannot run.
+- Automatic compaction is Morph-first when `autoCompactEnabled` is enabled, then falls back to Pi if Morph cannot produce a result.
 - When `autoCompactEnabled` is `false`, automatic compaction skips Morph entirely and leaves compaction to Pi.
-- `/morph-compact` stays explicit and Morph-only: the manual command always requires Morph compaction and surfaces an error if Morph cannot be used.
 
 Example `/morph_status` fields:
 
-- `Morph plugin version: 0.1.6`
+- `Morph plugin version: 0.1.7`
 - `Morph config: ~/.pi/agent/morph.json`
 - `Morph API key: configured`
 - `Morph API key source: single key`, `3 keys (round-robin)`, or `key file: ~/.pi/agent/morph.env` depending on your configuration
@@ -185,9 +205,9 @@ Example `/morph_status` fields:
 - `Morph-first local search guidance active: true`
 - `Morph-first GitHub search guidance active: true`
 - `Fallback to native tools: true`
-- `Manual /morph-compact` will fail loudly if Morph compaction is unavailable instead of silently using Pi compaction.
+- `Manual /morph-compact` will report a warning if there are no older messages available to compact.
 
-`/morph_status` is the main summary view. Use `/morph_settings` when you want to change config interactively instead of editing JSON by hand. Reload the extension or session after credential or key-file changes so Morph clients are rebuilt with the new config. The footer also shows `MorphLLM` plus the loaded API key count, and includes the strategy when multiple keys are active.
+`/morph_status` is the main summary view. Use `/morph_settings` when you want to change config interactively instead of editing JSON by hand. Reload the extension or session after credential or key-file changes so Morph clients are rebuilt with the new config. The footer also shows `MorphLLM` plus the loaded API key count, including the active strategy when multiple keys are configured.
 
 ## Tools
 

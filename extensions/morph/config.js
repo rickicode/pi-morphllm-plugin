@@ -14,6 +14,13 @@ const DEFAULT_MULTI_API_KEY_FILE = path.resolve(
 	os.homedir(),
 	".pi/agent/morph.env",
 );
+const MORPH_FASTAPPLY_AGENT_BLOCK_START = "<!-- pi-morphllm-plugin:fastapply:start -->";
+const MORPH_FASTAPPLY_AGENT_BLOCK_END = "<!-- pi-morphllm-plugin:fastapply:end -->";
+const MORPH_FASTAPPLY_AGENT_INSTRUCTION_BLOCK = [
+	MORPH_FASTAPPLY_AGENT_BLOCK_START,
+	"Morph FastApply: For existing-file edits, always use morph_fastapply first. Use native write only for brand new files, and use native edit only as a fallback when morph_fastapply is unavailable or clearly unsuitable.",
+	MORPH_FASTAPPLY_AGENT_BLOCK_END,
+].join("\n");
 
 function parseBoolValue(value, fallback = true) {
 	if (value === undefined || value === null) return fallback;
@@ -61,6 +68,31 @@ function loadJsonConfig(cwd = process.cwd()) {
 
 function resolveWritableConfigPath() {
 	return path.resolve(os.homedir(), ".pi/agent/morph.json");
+}
+
+function resolveGlobalAgentsPath() {
+	return path.resolve(os.homedir(), ".pi/agent/AGENTS.md");
+}
+
+export function ensureGlobalMorphAgentInstruction() {
+	const agentsPath = resolveGlobalAgentsPath();
+	mkdirSync(path.dirname(agentsPath), { recursive: true });
+
+	const existing = existsSync(agentsPath)
+		? readFileSync(agentsPath, "utf8")
+		: "";
+	if (
+		existing.includes(MORPH_FASTAPPLY_AGENT_BLOCK_START) &&
+		existing.includes(MORPH_FASTAPPLY_AGENT_BLOCK_END)
+	) {
+		return { updated: false, path: agentsPath };
+	}
+
+	const next = existing.trim().length
+		? `${existing.replace(/\s*$/, "")}\n\n${MORPH_FASTAPPLY_AGENT_INSTRUCTION_BLOCK}\n`
+		: `${MORPH_FASTAPPLY_AGENT_INSTRUCTION_BLOCK}\n`;
+	writeFileSync(agentsPath, next, "utf8");
+	return { updated: true, path: agentsPath };
 }
 
 function resolveConfigRelativePath(configPath, targetPath, cwd = process.cwd()) {
@@ -249,4 +281,7 @@ export {
 	EXISTING_CODE_MARKER,
 	MORPH_ROUTING_HINT_HEADER,
 	READONLY_AGENTS,
+	MORPH_FASTAPPLY_AGENT_BLOCK_END,
+	MORPH_FASTAPPLY_AGENT_BLOCK_START,
+	MORPH_FASTAPPLY_AGENT_INSTRUCTION_BLOCK,
 };

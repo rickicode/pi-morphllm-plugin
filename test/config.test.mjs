@@ -218,6 +218,34 @@ test("ensureMorphConfigFile creates global config by default", async () => {
 	}
 });
 
+test("ensureGlobalMorphAgentInstruction creates a dedicated AGENTS.md block once", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const mod = await import(
+		`../extensions/morph/config.js?${Date.now()}-${Math.random()}`
+	);
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
+	try {
+		const first = mod.ensureGlobalMorphAgentInstruction();
+		assert.equal(first.updated, true);
+
+		const agentsPath = path.join(tempHome, ".pi", "agent", "AGENTS.md");
+		const firstRaw = await readFile(agentsPath, "utf8");
+		assert.match(firstRaw, /<!-- pi-morphllm-plugin:fastapply:start -->/);
+		assert.match(firstRaw, /always use morph_fastapply first/);
+		assert.match(firstRaw, /<!-- pi-morphllm-plugin:fastapply:end -->/);
+
+		const second = mod.ensureGlobalMorphAgentInstruction();
+		assert.equal(second.updated, false);
+		const secondRaw = await readFile(agentsPath, "utf8");
+		assert.equal(secondRaw, firstRaw);
+	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+	}
+});
+
 test("invalid routing modes fall back to safe defaults", async () => {
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), "pi-morph-config-"));
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));

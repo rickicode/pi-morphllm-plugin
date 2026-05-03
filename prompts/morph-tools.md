@@ -1,12 +1,9 @@
-# Morph Tool Selection Policy
+# Morph Tools
 
-Use Morph tools when they are the best fit for the task.
+This package adds Morph-powered tools to Pi for editing, search, and compaction workflows.
 
-- Use Pi built-in `edit` for small exact replacements.
-- Use Pi built-in `write` for brand new files.
-- Use `morph_fastapply` for large files, multiple scattered edits, or whitespace-sensitive merges in existing files.
-- Use `warpgrep_codebase_search` for exploratory questions about the current workspace.
-- Use `warpgrep_github_search` for public GitHub source questions about external libraries, SDKs, or frameworks.
-- If the model chooses a workable native tool anyway, allow it and continue instead of blocking.
-- If `MORPH_API_KEY` is missing or a Morph request fails, fall back to native Pi tools.
+- `morph_fastapply` is for existing-file edits that are large, multi-location, or whitespace-sensitive.
+- `warpgrep_codebase_search` is for natural-language exploration of the current workspace.
+- `warpgrep_github_search` is for natural-language exploration of public GitHub repositories.
 - When using `morph_fastapply`, wrap unchanged code with `// ... existing code ...` markers.
+- If Morph is unavailable or a Morph request fails, fall back to native Pi tools.

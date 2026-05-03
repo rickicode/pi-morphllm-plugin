@@ -55,8 +55,8 @@ test("README documents package-first Pi usage", async () => {
 	assert.match(readme, /Large files, multi-location edits, and whitespace-sensitive merges should use `morph_fastapply`/);
 	assert.match(readme, /prompt-level Morph-first routing guidance without blocking native Pi tools/i);
 	assert.match(readme, /~\/\.pi\/agent\/morph\.json/);
-	assert.match(readme, /auto-creates that global file on first runtime load/i);
-	assert.match(readme, /Installing the package alone does not create the file/);
+	assert.match(readme, /auto-creates that file on first runtime load/i);
+	assert.match(readme, /Installing the package alone does not create it/i);
 	assert.match(readme, /routing\.editMode/);
 	assert.match(readme, /Morph FastApply-first guidance active: true/);
 	assert.match(readme, /Morph-first local search guidance active: true/);

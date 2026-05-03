@@ -6,6 +6,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import {
 	DEFAULT_MORPH_BASE_URL,
+	ensureGlobalMorphAgentInstruction,
 	EXISTING_CODE_MARKER,
 	ensureMorphConfigFile,
 	getMorphConfig,
@@ -28,7 +29,7 @@ import {
 	normalizeCodeEditInput,
 } from "./utils.js";
 
-const PLUGIN_VERSION = "0.1.6";
+const PLUGIN_VERSION = "0.1.7";
 
 function createApiKeySelector(config) {
 	const apiKeys = config.apiKeys || [];
@@ -1096,6 +1097,7 @@ async function updateMorphSettingInteractively(ctx, cwd) {
 
 export default async function morphExtension(pi) {
 	const configFile = ensureMorphConfigFile(process.cwd());
+	ensureGlobalMorphAgentInstruction();
 	const config = getMorphConfig(process.cwd());
 	const clients = await createClients(config);
 	const forceMorphCompactRef = { value: false };
