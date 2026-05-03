@@ -795,6 +795,18 @@ function shouldForceGithubSearch(config) {
 	return config.routing?.githubSearchMode === "force";
 }
 
+function ensureGlobalMorphAgentInstructionSafely(config) {
+	if (!config.fastApplyEnabled || !shouldForceMorphEdit(config)) {
+		return { updated: false, skipped: true };
+	}
+
+	try {
+		return ensureGlobalMorphAgentInstruction();
+	} catch {
+		return { updated: false, skipped: true };
+	}
+}
+
 function createMorphCompactHandler(forceMorphCompactRef, strictMorphCompactRef) {
 	return async (_args, ctx) => {
 		try {
@@ -1097,8 +1109,8 @@ async function updateMorphSettingInteractively(ctx, cwd) {
 
 export default async function morphExtension(pi) {
 	const configFile = ensureMorphConfigFile(process.cwd());
-	ensureGlobalMorphAgentInstruction();
 	const config = getMorphConfig(process.cwd());
+	ensureGlobalMorphAgentInstructionSafely(config);
 	const clients = await createClients(config);
 	const forceMorphCompactRef = { value: false };
 	const strictMorphCompactRef = { value: false };

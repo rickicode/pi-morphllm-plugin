@@ -147,6 +147,34 @@ test("extension auto-creates global config on load when none exists", async () =
 	}
 });
 
+test("extension writes Morph AGENTS block only when fastApply force mode is active", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousCwd = process.cwd();
+	process.env.HOME = tempHome;
+	process.chdir(tempCwd);
+	await writeFile(
+		path.join(tempCwd, "morph.config.json"),
+		`${JSON.stringify({ apiKey: "test-key", editEnabled: false }, null, 2)}\n`,
+		"utf8",
+	);
+	try {
+		const extension = await loadExtension();
+		const pi = createFakePi();
+		await assert.doesNotReject(() => extension(pi));
+
+		const agentsPath = path.join(tempHome, ".pi", "agent", "AGENTS.md");
+		await assert.rejects(() => readFile(agentsPath, "utf8"), /ENOENT/);
+	} finally {
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
+});
+
 test("morph_fastapply tool exposes dry_run parameter", async () => {
 	const extension = await loadExtension();
 	const pi = createFakePi();
