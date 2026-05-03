@@ -1,4 +1,5 @@
-import { readFile as readFileFs, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile as readFileFs, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -925,6 +926,132 @@ function formatStatusMessage(lines) {
 	return `Morph status\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
 
+function formatSelfTestMessage(results) {
+	return `Morph self-test\n${results.map((line) => `- ${line}`).join("\n")}`;
+}
+
+async function runMorphSelfTest(config, clients, cwd) {
+	const results = [`Morph plugin version: ${PLUGIN_VERSION}`];
+
+	results.push(`API probe: ${await probeMorphApi(config, clients)}`);
+
+	if (!config.apiKey || clients.loadError) {
+		results.push("FastApply: skipped (Morph client unavailable)");
+		results.push("WarpGrep local: skipped (WarpGrep client unavailable)");
+		results.push("WarpGrep GitHub: skipped (WarpGrep client unavailable)");
+		results.push("Compact: skipped (Compact client unavailable)");
+		return results;
+	}
+
+	const tempDir = await mkdtemp(path.join(os.tmpdir(), "pi-morph-selftest-"));
+	const tempFile = path.join(tempDir, "selftest.js");
+
+	try {
+		await writeFile(
+			tempFile,
+			[
+				"export function add(a, b) {",
+				"\treturn a + b;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		try {
+			const fastApplyResult = await clients.morph.fastApply.applyEdit(
+				{
+					originalCode: await readFile(tempFile),
+					codeEdit: [
+						"export function add(a, b) {",
+						"\tif (typeof a !== 'number' || typeof b !== 'number') {",
+						"\t\tthrow new TypeError('Arguments must be numbers');",
+						"\t}",
+						`\t${EXISTING_CODE_MARKER}`,
+						"}",
+					].join("\n"),
+					instruction: "I am adding input validation to the add function.",
+					filepath: tempFile,
+				},
+				{
+					morphApiUrl: config.baseUrl,
+					generateUdiff: true,
+				},
+			);
+			results.push(
+				fastApplyResult.success && fastApplyResult.mergedCode?.includes("TypeError")
+					? "FastApply: ok"
+					: `FastApply: failed (${fastApplyResult.error || "unexpected response"})`,
+			);
+		} catch (error) {
+			results.push(`FastApply: ${formatMorphProbeError(error)}`);
+		}
+
+		try {
+			const generator = clients.warpGrep.execute({
+				searchTerm: "find the add function in the self-test file",
+				repoRoot: tempDir,
+				streamSteps: true,
+			});
+			let warpLocalResult;
+			for (;;) {
+				const next = await generator.next();
+				if (next.done) {
+					warpLocalResult = next.value;
+					break;
+				}
+			}
+			const formatted = formatWarpGrepResult(warpLocalResult);
+			results.push(
+				formatted.includes("selftest.js") ? "WarpGrep local: ok" : "WarpGrep local: failed (target file not found)",
+			);
+		} catch (error) {
+			results.push(`WarpGrep local: ${formatMorphProbeError(error)}`);
+		}
+
+		try {
+			const warpGithubResult = await clients.warpGrep.searchGitHub({
+				searchTerm: "find package metadata in package.json",
+				github: "vercel/next.js",
+			});
+			const formatted = formatWarpGrepResult(warpGithubResult);
+			const hasPackageJson = formatted.includes("package.json");
+			const hasPackageMetadata =
+				formatted.includes('"name"') ||
+				formatted.includes('"version"') ||
+				formatted.includes('"private"');
+			results.push(
+				warpGithubResult?.success && hasPackageJson && hasPackageMetadata
+					? "WarpGrep GitHub: ok"
+					: warpGithubResult?.success
+						? "WarpGrep GitHub: failed (package.json metadata not found)"
+						: `WarpGrep GitHub: failed (${warpGithubResult?.error || "unexpected response"})`,
+			);
+		} catch (error) {
+			results.push(`WarpGrep GitHub: ${formatMorphProbeError(error)}`);
+		}
+
+		try {
+			const compactResult = await clients.compact.compact({
+				messages: [
+					{ role: "user", content: "Please compact this short self-test message." },
+					{ role: "assistant", content: "This is a sample response used for Morph compact self-testing." },
+				],
+				compressionRatio: 0.5,
+				preserveRecent: 0,
+			});
+			results.push(
+				typeof compactResult?.output === "string" ? "Compact: ok" : "Compact: failed (unexpected response shape)",
+			);
+		} catch (error) {
+			results.push(`Compact: ${formatMorphProbeError(error)}`);
+		}
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+
+	return results;
+}
+
 async function updateMorphSettingInteractively(ctx, cwd) {
 	const choice = await ctx.ui.select("Morph settings", [
 		"Routing edit mode",
@@ -1088,6 +1215,20 @@ export default async function morphExtension(pi) {
 					"Restart or reload the extension/session to pick up updated Morph settings and refresh Morph clients if credentials or key files changed.",
 					"info",
 				);
+			}
+		},
+	});
+
+	pi.registerCommand("morph_selftest", {
+		description: "Run real Morph self-tests against FastApply, WarpGrep, GitHub search, and compact",
+		handler: async (_args, ctx) => {
+			if (ctx.hasUI) {
+				ctx.ui.notify("Running Morph self-test...", "info");
+			}
+			const results = await runMorphSelfTest(config, clients, process.cwd());
+			const message = formatSelfTestMessage(results);
+			if (ctx.hasUI) {
+				ctx.ui.notify(message, "info");
 			}
 		},
 	});

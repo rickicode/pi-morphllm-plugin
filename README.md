@@ -159,6 +159,7 @@ Invalid routing mode strings automatically fall back to safe defaults:
 
 - `/morph_status` shows the loaded config path, API key status, runs a live Morph API probe with the configured key, shows SDK status, base URL, feature flags, routing mode state, and whether Morph-first guidance is active.
 - `/morph_settings` opens a simple interactive menu for updating routing settings in `morph.json`.
+- `/morph_selftest` runs real Morph self-tests against FastApply, local WarpGrep, GitHub WarpGrep, compact, and the live API probe using temporary files and sample queries. The GitHub check is stricter and verifies that package metadata is actually found in a public repository result.
 - Auto compaction is Morph-first when `autoCompactEnabled` is enabled: when Pi triggers compaction automatically, this plugin tries Morph compaction first and only falls back to Pi compaction if Morph is unavailable or cannot produce a result.
 - When `autoCompactEnabled` is `false`, automatic compaction skips Morph entirely and leaves compaction to Pi.
 - `/morph-compact` stays explicit and Morph-only: the manual command always requires Morph compaction and surfaces an error if Morph cannot be used.
