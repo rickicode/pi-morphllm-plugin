@@ -1,12 +1,11 @@
 {
   "apiKey": "sk-...",
-  "apiKeyFile": "~/.pi/agent/morph.txt",
+  "apiKeyFile": "~/.pi/agent/morph.env",
   "apiKeyStrategy": "round-robin",
-  "baseUrl": "https://api.morphllm.com",
   "editEnabled": true,
   "warpgrepEnabled": true,
   "warpgrepGithubEnabled": true,
-  "compactEnabled": true,
+  "autoCompactEnabled": true,
   "allowReadonlyAgents": false,
   "routing": {
     "editMode": "force",

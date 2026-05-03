@@ -20,16 +20,35 @@ async function loadExtensionWithEnv(env = {}) {
 		else process.env[key] = String(value);
 	}
 
-	const module = await import(
-		`../extensions/morph/index.js?test=${Date.now()}-${Math.random()}`
-	);
+	try {
+		const module = await import(
+			`../extensions/morph/index.js?test=${Date.now()}-${Math.random()}`
+		);
+		return module.default;
+	} finally {
+		for (const [key] of Object.entries(env)) {
+			if (previous[key] === undefined) delete process.env[key];
+			else process.env[key] = previous[key];
+		}
+	}
+}
 
-	for (const [key] of Object.entries(env)) {
-		if (previous[key] === undefined) delete process.env[key];
-		else process.env[key] = previous[key];
+async function withEnv(env, fn) {
+	const previous = {};
+	for (const [key, value] of Object.entries(env)) {
+		previous[key] = process.env[key];
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = String(value);
 	}
 
-	return module.default;
+	try {
+		return await fn();
+	} finally {
+		for (const [key] of Object.entries(env)) {
+			if (previous[key] === undefined) delete process.env[key];
+			else process.env[key] = previous[key];
+		}
+	}
 }
 
 function createFakePi() {
@@ -101,7 +120,7 @@ test("before_agent_start does not duplicate Morph routing hints", async () => {
 test("session_before_compact reads messages from branchEntries", async () => {
 	const extension = await loadExtensionWithEnv({
 		MORPH_API_KEY: undefined,
-		MORPH_COMPACT: "true",
+		MORPH_AUTO_COMPACT: "true",
 	});
 	const pi = createFakePi();
 	await extension(pi);
@@ -151,7 +170,8 @@ test("extension auto-creates global config on load when none exists", async () =
 		await extension(pi);
 		const configPath = path.join(tempHome, ".pi", "agent", "morph.json");
 		const raw = await readFile(configPath, "utf8");
-		assert.equal(JSON.parse(raw).baseUrl, "https://api.morphllm.com");
+		const json = JSON.parse(raw);
+		assert.equal("baseUrl" in json, false);
 		const command = pi.commands.get("morph_status");
 		await assert.doesNotReject(() =>
 			command.handler("", {
@@ -296,7 +316,7 @@ test("morph-compact command triggers ctx.compact", async () => {
 	assert.equal(called, 1);
 });
 
-test("morph-compact forces Morph compaction path past the threshold guard", async () => {
+test("morph-compact requires Morph compaction instead of silently falling back", async () => {
 	const extension = await loadExtensionWithEnv({
 		MORPH_API_KEY: undefined,
 	});
@@ -314,7 +334,7 @@ test("morph-compact forces Morph compaction path past the threshold guard", asyn
 		ui: { notify() {} },
 	});
 
-	await assert.doesNotReject(() =>
+	await assert.rejects(() =>
 		compactHandler(
 			{
 				branchEntries: [
@@ -337,6 +357,146 @@ test("morph-compact forces Morph compaction path past the threshold guard", asyn
 			},
 		),
 	);
+});
+
+test("morph-compact still forces Morph when auto compaction is disabled", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousConfig = process.env.MORPH_CONFIG;
+	const previousCwd = process.cwd();
+	process.chdir(tempCwd);
+	const configPath = path.join(tempCwd, "morph.config.json");
+	await writeFile(
+		configPath,
+		`${JSON.stringify({ apiKey: "test-key", autoCompactEnabled: false }, null, 2)}\n`,
+		"utf8",
+	);
+	process.env.MORPH_CONFIG = configPath;
+	process.env.HOME = tempHome;
+	try {
+		await withEnv(
+			{
+				MORPH_API_KEY: undefined,
+				MORPH_AUTO_COMPACT: undefined,
+			},
+			async () => {
+				const extension = await loadExtensionWithEnv();
+				const pi = createFakePi();
+				await extension(pi);
+
+				const compactCommand = pi.commands.get("morph-compact");
+				const compactHandler = pi.handlers.get("session_before_compact");
+				assert.ok(compactCommand);
+				assert.ok(compactHandler);
+
+				await compactCommand.handler("", {
+					hasUI: false,
+					compact() {},
+					ui: { notify() {} },
+				});
+
+				await assert.rejects(
+					() =>
+						compactHandler(
+							{
+								branchEntries: [
+									{
+										type: "message",
+										message: {
+											role: "user",
+											content: [{ type: "text", text: "small message" }],
+										},
+									},
+								],
+								preparation: {
+									firstKeptEntryId: "abc",
+									tokensBefore: 100,
+								},
+							},
+							{
+								hasUI: false,
+								ui: { notify() {} },
+							},
+						),
+					/Conversation is below the Morph compaction threshold/,
+				);
+			},
+		);
+	} finally {
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
+		else process.env.MORPH_CONFIG = previousConfig;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
+});
+
+test("auto compaction skips Morph when auto compaction is disabled", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousConfig = process.env.MORPH_CONFIG;
+	const previousCwd = process.cwd();
+	process.chdir(tempCwd);
+	const configPath = path.join(tempCwd, "morph.config.json");
+	await writeFile(
+		configPath,
+		`${JSON.stringify({ apiKey: "test-key", autoCompactEnabled: false }, null, 2)}\n`,
+		"utf8",
+	);
+	process.env.MORPH_CONFIG = configPath;
+	process.env.HOME = tempHome;
+	try {
+		await withEnv(
+			{
+				MORPH_API_KEY: undefined,
+				MORPH_AUTO_COMPACT: undefined,
+			},
+			async () => {
+				const extension = await loadExtensionWithEnv();
+				const pi = createFakePi();
+				await extension(pi);
+
+				const compactHandler = pi.handlers.get("session_before_compact");
+				assert.ok(compactHandler);
+
+				const result = await compactHandler(
+					{
+						branchEntries: [
+							{
+								type: "message",
+								message: {
+									role: "user",
+									content: [{ type: "text", text: "hello".repeat(5000) }],
+								},
+							},
+						],
+						preparation: {
+							firstKeptEntryId: "abc",
+							tokensBefore: 100,
+						},
+					},
+					{
+						hasUI: false,
+						ui: { notify() {} },
+					},
+				);
+
+				assert.equal(result, undefined);
+			},
+		);
+	} finally {
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
+		else process.env.MORPH_CONFIG = previousConfig;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
 });
 
 test("force edit mode keeps native edit and write available", async () => {

@@ -12,7 +12,7 @@ const READONLY_AGENTS = ["plan", "explore"];
 const MULTI_API_KEY_SENTINEL = "multiple";
 const DEFAULT_MULTI_API_KEY_FILE = path.resolve(
 	os.homedir(),
-	".pi/agent/morph.txt",
+	".pi/agent/morph.env",
 );
 
 function parseBoolValue(value, fallback = true) {
@@ -101,11 +101,10 @@ function buildDefaultJsonConfig() {
 		apiKey: "",
 		apiKeyFile: DEFAULT_MULTI_API_KEY_FILE,
 		apiKeyStrategy: "round-robin",
-		baseUrl: DEFAULT_MORPH_BASE_URL,
 		editEnabled: true,
 		warpgrepEnabled: true,
 		warpgrepGithubEnabled: true,
-		compactEnabled: true,
+		autoCompactEnabled: true,
 		allowReadonlyAgents: false,
 		routing: {
 			editMode: "force",
@@ -213,8 +212,8 @@ export function getMorphConfig(cwd = process.cwd()) {
 			json.warpgrepGithubEnabled ?? process.env.MORPH_WARPGREP_GITHUB,
 			true,
 		),
-		compactEnabled: parseBoolValue(
-			json.compactEnabled ?? process.env.MORPH_COMPACT,
+		autoCompactEnabled: parseBoolValue(
+			json.autoCompactEnabled ?? process.env.MORPH_AUTO_COMPACT,
 			true,
 		),
 		allowReadonlyAgents: parseBoolValue(
@@ -248,22 +247,23 @@ export function getMorphConfig(cwd = process.cwd()) {
 		},
 		compactContextThreshold: parseNumberValue(
 			json.compactContextThreshold ??
-				process.env.MORPH_COMPACT_CONTEXT_THRESHOLD,
+				process.env.MORPH_AUTO_COMPACT_CONTEXT_THRESHOLD,
 			0.7,
 		),
 		compactPreserveRecent: parseNumberValue(
-			json.compactPreserveRecent ?? process.env.MORPH_COMPACT_PRESERVE_RECENT,
+			json.compactPreserveRecent ??
+				process.env.MORPH_AUTO_COMPACT_PRESERVE_RECENT,
 			1,
 		),
 		compactRatio: parseNumberValue(
-			json.compactRatio ?? process.env.MORPH_COMPACT_RATIO,
+			json.compactRatio ?? process.env.MORPH_AUTO_COMPACT_RATIO,
 			0.3,
 		),
 		compactTokenLimit:
 			json.compactTokenLimit !== undefined
 				? parseNumberValue(json.compactTokenLimit, null)
-				: process.env.MORPH_COMPACT_TOKEN_LIMIT
-					? parseNumberValue(process.env.MORPH_COMPACT_TOKEN_LIMIT, null)
+				: process.env.MORPH_AUTO_COMPACT_TOKEN_LIMIT
+					? parseNumberValue(process.env.MORPH_AUTO_COMPACT_TOKEN_LIMIT, null)
 					: null,
 		timeoutMs: parseNumberValue(
 			json.timeoutMs ?? process.env.MORPH_TIMEOUT,
@@ -274,7 +274,7 @@ export function getMorphConfig(cwd = process.cwd()) {
 			DEFAULT_WARPGREP_TIMEOUT_MS,
 		),
 		compactTimeoutMs: parseNumberValue(
-			json.compactTimeoutMs ?? process.env.MORPH_COMPACT_TIMEOUT,
+			json.compactTimeoutMs ?? process.env.MORPH_AUTO_COMPACT_TIMEOUT,
 			DEFAULT_COMPACT_TIMEOUT_MS,
 		),
 	};

@@ -91,11 +91,10 @@ Example config:
 ```json
 {
   "apiKey": "sk-...",
-  "baseUrl": "https://my-morph-proxy.example.com",
   "editEnabled": true,
   "warpgrepEnabled": true,
   "warpgrepGithubEnabled": true,
-  "compactEnabled": true,
+  "autoCompactEnabled": true,
   "routing": {
     "editMode": "force",
     "codebaseSearchMode": "force",
@@ -116,17 +115,17 @@ Example config:
 
 Pi Morph also supports key rotation across multiple Morph API keys.
 Set `apiKey` to `"multiple"`, point `apiKeyFile` at a text file, and choose an `apiKeyStrategy`.
+Only add `baseUrl` when you want to use a custom Morph-compatible endpoint.
 
 ```json
 {
   "apiKey": "multiple",
-  "apiKeyFile": "~/.pi/agent/morph.txt",
-  "apiKeyStrategy": "round-robin",
-  "baseUrl": "https://api.morphllm.com"
+  "apiKeyFile": "~/.pi/agent/morph.env",
+  "apiKeyStrategy": "round-robin"
 }
 ```
 
-Example `morph.txt`:
+Example `morph.env`:
 
 ```txt
 sk-key-1
@@ -150,7 +149,7 @@ Routing config lives inside `morph.json`:
 - `routing.codebaseSearchMode` - `prefer`, `strong`, or `force` for prompt-level local WarpGrep guidance; default is `force`
 - `routing.githubSearchMode` - `prefer`, `strong`, or `force` for prompt-level public GitHub WarpGrep guidance; default is `force`
 - `routing.fallbackToNativeTools` - when `true`, Morph tool failures explicitly fall back to native Pi tools
-- `routing.forceMorphCompactCommand` - when `true`, `/morph-compact` forces the Morph compaction path
+- `routing.forceMorphCompactCommand` - when `true`, `/morph-compact` requires the Morph compaction path instead of silently falling back to Pi compaction
 
 Invalid routing mode strings automatically fall back to safe defaults:
 
@@ -162,6 +161,8 @@ Invalid routing mode strings automatically fall back to safe defaults:
 
 If you still want env-based setup, these keys are supported:
 
+Add `baseUrl` in JSON config or `MORPH_BASE_URL` only when you want to override the default `https://api.morphllm.com` endpoint.
+
 - `MORPH_API_KEY` - Morph API key, or `multiple` to enable file-based key rotation
 - `MORPH_API_KEY_FILE` - optional path to a newline-delimited API key file for multi-key mode
 - `MORPH_API_KEY_STRATEGY` - `round-robin` or `random` for multi-key selection
@@ -170,28 +171,32 @@ If you still want env-based setup, these keys are supported:
 - `MORPH_EDIT` - set `false` to disable `morph_fastapply`
 - `MORPH_WARPGREP` - set `false` to disable local WarpGrep
 - `MORPH_WARPGREP_GITHUB` - set `false` to disable GitHub WarpGrep
-- `MORPH_COMPACT` - set `false` to disable Morph compaction
+- `MORPH_AUTO_COMPACT` - set `false` to disable automatic Morph compaction while keeping `/morph-compact` available as an explicit Morph-only command
 - `MORPH_ALLOW_READONLY_AGENTS` - set `true` to allow `morph_fastapply` in readonly agents
-- `MORPH_COMPACT_TOKEN_LIMIT` - optional fixed compaction trigger in tokens
-- `MORPH_COMPACT_CONTEXT_THRESHOLD` - optional fraction of context window to trigger compaction
-- `MORPH_COMPACT_PRESERVE_RECENT` - recent messages to keep uncompacted
-- `MORPH_COMPACT_RATIO` - target compression ratio
+- `MORPH_AUTO_COMPACT_TOKEN_LIMIT` - optional fixed compaction trigger in tokens
+- `MORPH_AUTO_COMPACT_CONTEXT_THRESHOLD` - optional fraction of context window to trigger compaction
+- `MORPH_AUTO_COMPACT_PRESERVE_RECENT` - recent messages to keep uncompacted
+- `MORPH_AUTO_COMPACT_RATIO` - target compression ratio
 - `MORPH_TIMEOUT` - optional Fast Apply timeout in ms
 - `MORPH_WARPGREP_TIMEOUT` - optional WarpGrep timeout in ms
-- `MORPH_COMPACT_TIMEOUT` - optional compaction timeout in ms
+- `MORPH_AUTO_COMPACT_TIMEOUT` - optional compaction timeout in ms
 
 ## Commands
 
 - `/morph_status` shows the loaded config path, API key status, SDK status, base URL, feature flags, routing mode state, and whether Morph-first guidance is active.
 - `/morph_settings` opens a simple interactive menu for updating routing settings in `morph.json`.
-- `/morph-compact` follows `routing.forceMorphCompactCommand`: force Morph compaction when enabled, or run normal Pi compaction with Morph auto-compaction rules when disabled.
+- Auto compaction is Morph-first when `autoCompactEnabled` is enabled: when Pi triggers compaction automatically, this plugin tries Morph compaction first and only falls back to Pi compaction if Morph is unavailable or cannot produce a result.
+- When `autoCompactEnabled` is `false`, automatic compaction skips Morph entirely and leaves compaction to Pi.
+- `/morph-compact` stays explicit and Morph-only: when `routing.forceMorphCompactCommand` is enabled, the manual command requires Morph compaction and surfaces an error if Morph cannot be used; when disabled, it runs normal Pi compaction with Morph auto-compaction rules.
 
 Example `/morph_status` fields:
 
 - `Morph config: ~/.pi/agent/morph.json`
 - `Morph API key: configured`
-- `Morph API key source: single key`, `3 keys (round-robin)`, or `key file: ~/.pi/agent/morph.txt` depending on your configuration
+- `Morph API key source: single key`, `3 keys (round-robin)`, or `key file: ~/.pi/agent/morph.env` depending on your configuration
 - `Morph FastApply enabled: true`
+- `Auto compaction policy: Morph first, Pi fallback`
+- `Manual /morph-compact policy: Morph required`
 - `Routing edit mode: force`
 - `Routing codebase search mode: force`
 - `Routing GitHub search mode: force`
@@ -200,6 +205,7 @@ Example `/morph_status` fields:
 - `Morph-first GitHub search guidance active: true`
 - `Fallback to native tools: true`
 - `Force /morph-compact: true`
+- `Manual /morph-compact` will fail loudly if Morph compaction is unavailable instead of silently using Pi compaction.
 
 `/morph_status` is the main summary view. Use `/morph_settings` when you want to change config interactively instead of editing JSON by hand. Reload the extension or session after credential or key-file changes so Morph clients are rebuilt with the new config. The footer also shows `MorphLLM` plus the loaded API key count, and includes the strategy when multiple keys are active.
 
@@ -215,7 +221,7 @@ Example `/morph_status` fields:
 
 Example `morph_fastapply` diff preview:
 
-![Morph FastApply preview](images/fastapply.png)
+![Morph FastApply preview](https://raw.githubusercontent.com/rickicode/pi-morphllm-plugin/main/images/fastapply.png)
 
 Example `morph_fastapply` preview call:
 
@@ -239,8 +245,9 @@ This package uses Pi extension hooks rather than command aliases alone.
 - `tool_call` normalizes tool input before execution.
 - `tool_result` adds Morph metadata such as provider and base URL.
 - `model_select` tracks the active model context window.
-- `session_before_compact` runs Morph compaction before Pi falls back to its normal compactor.
-- `/morph-compact` either forces the Morph compaction path or follows normal threshold rules depending on `routing.forceMorphCompactCommand`.
+- `session_before_compact` runs Morph compaction before Pi falls back to its normal compactor, so automatic compaction stays Morph-first while preserving Pi as the safety net whenever `autoCompactEnabled` is on.
+- When `autoCompactEnabled` is off, `session_before_compact` skips Morph and leaves automatic compaction to Pi.
+- `/morph-compact` uses the same hook-based path, but when `routing.forceMorphCompactCommand` is enabled the manual command requires Morph compaction instead of silently falling back to Pi.
 
 ## Development
 

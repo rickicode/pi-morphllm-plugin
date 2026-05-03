@@ -646,6 +646,40 @@ function trimMessagesForCompaction(messages, preserveRecent) {
 	};
 }
 
+function buildMorphCompactionSkipReason(
+	config,
+	clients,
+	messages,
+	modelContextTokens,
+	options = {},
+) {
+	const respectCompactEnabled = options.respectCompactEnabled !== false;
+	if (respectCompactEnabled && !config.autoCompactEnabled) {
+		return "Morph compaction is disabled.";
+	}
+	if (!config.apiKey) return "Morph API key is not configured.";
+	if (!clients.compact) return "Morph compact client is unavailable.";
+
+	const charThreshold = compactThresholdToChars(config, modelContextTokens);
+	if (estimateCharsFromMessages(messages) < charThreshold) {
+		return `Conversation is below the Morph compaction threshold (${charThreshold} chars).`;
+	}
+
+	const split = trimMessagesForCompaction(messages, config.compactPreserveRecent);
+	if (!split || split.older.length === 0) {
+		return "There are no older messages available to compact after preserving recent context.";
+	}
+
+	const compactInput = split.older
+		.map((message) => serializeMessageContent(message.content))
+		.filter((content) => content.length > 0);
+	if (compactInput.length === 0) {
+		return "There is no serializable message content available for Morph compaction.";
+	}
+
+	return null;
+}
+
 async function runMorphCompaction(
 	event,
 	ctx,
@@ -655,22 +689,48 @@ async function runMorphCompaction(
 	options = {},
 ) {
 	const force = options.force === true;
-	if (!config.compactEnabled || !config.apiKey || !clients.compact) return;
+	const strict = options.strict === true;
 
 	const messages = event.branchEntries
 		.filter((entry) => entry.type === "message")
 		.map((entry) => entry.message);
 
-	const charThreshold = compactThresholdToChars(config, modelContextTokens);
-	if (!force && estimateCharsFromMessages(messages) < charThreshold) {
-		return;
+	if (!force) {
+		if (!config.autoCompactEnabled || !config.apiKey || !clients.compact) return;
+		const charThreshold = compactThresholdToChars(config, modelContextTokens);
+		if (estimateCharsFromMessages(messages) < charThreshold) {
+			return;
+		}
+	} else {
+		const reason = buildMorphCompactionSkipReason(
+			config,
+			clients,
+			messages,
+			modelContextTokens,
+			{ respectCompactEnabled: false },
+		);
+		if (reason) {
+			if (strict) throw new Error(reason);
+			if (ctx.hasUI) {
+				ctx.ui.notify(`Morph compact skipped: ${reason}`, "warning");
+			}
+			return;
+		}
 	}
 
+	const charThreshold = compactThresholdToChars(config, modelContextTokens);
 	const split = trimMessagesForCompaction(
 		messages,
 		config.compactPreserveRecent,
 	);
-	if (!split || split.older.length === 0) return;
+	if (!split || split.older.length === 0) {
+		if (strict) {
+			throw new Error(
+				"There are no older messages available to compact after preserving recent context.",
+			);
+		}
+		return;
+	}
 
 	const compactInput = split.older
 		.map((message) => ({
@@ -679,7 +739,14 @@ async function runMorphCompaction(
 		}))
 		.filter((message) => message.content.length > 0);
 
-	if (compactInput.length === 0) return;
+	if (compactInput.length === 0) {
+		if (strict) {
+			throw new Error(
+				"There is no serializable message content available for Morph compaction.",
+			);
+		}
+		return;
+	}
 
 	try {
 		const result = await clients.compact.compact({
@@ -700,6 +767,7 @@ async function runMorphCompaction(
 			},
 		};
 	} catch (error) {
+		if (strict) throw error;
 		if (ctx.hasUI) {
 			ctx.ui.notify(`Morph compact failed: ${error.message}`, "warning");
 		}
@@ -719,13 +787,15 @@ function shouldForceGithubSearch(config) {
 	return config.routing?.githubSearchMode === "force";
 }
 
-function createMorphCompactHandler(forceMorphCompactRef, config) {
+function createMorphCompactHandler(forceMorphCompactRef, strictMorphCompactRef, config) {
 	return async (_args, ctx) => {
 		forceMorphCompactRef.value =
 			config.routing?.forceMorphCompactCommand !== false;
+		strictMorphCompactRef.value = true;
 		ctx.compact({
 			onComplete: (result) => {
 				forceMorphCompactRef.value = false;
+				strictMorphCompactRef.value = false;
 				if (!ctx.hasUI) return;
 				const summary = result.summary || "Compaction finished.";
 				ctx.ui.notify(
@@ -735,6 +805,7 @@ function createMorphCompactHandler(forceMorphCompactRef, config) {
 			},
 			onError: (error) => {
 				forceMorphCompactRef.value = false;
+				strictMorphCompactRef.value = false;
 				if (!ctx.hasUI) return;
 				ctx.ui.notify(`Morph compact failed: ${error.message}`, "warning");
 			},
@@ -783,7 +854,9 @@ function buildStatusLines(config, clients, configFile) {
 		`Morph FastApply enabled: ${config.fastApplyEnabled}`,
 		`WarpGrep enabled: ${config.warpgrepEnabled}`,
 		`WarpGrep GitHub enabled: ${config.warpgrepGithubEnabled}`,
-		`Compaction enabled: ${config.compactEnabled}`,
+		`Auto Morph compaction enabled: ${config.autoCompactEnabled}`,
+		`Auto compaction policy: Morph first, Pi fallback`,
+		`Manual /morph-compact policy: Morph required`,
 		`Readonly agents allowed: ${config.allowReadonlyAgents}`,
 		`Routing edit mode: ${config.routing?.editMode || "strong"}`,
 		`Routing codebase search mode: ${config.routing?.codebaseSearchMode || "prefer"}`,
@@ -843,15 +916,17 @@ async function updateMorphSettingInteractively(ctx, cwd) {
 }
 
 export default async function morphExtension(pi) {
-	const configFile = ensureMorphConfigFile();
-	const config = getMorphConfig();
+	const configFile = ensureMorphConfigFile(process.cwd());
+	const config = getMorphConfig(process.cwd());
 	const clients = await createClients(config);
-	let modelContextTokens = 200000;
 	const forceMorphCompactRef = { value: false };
+	const strictMorphCompactRef = { value: false };
 	const morphCompactHandler = createMorphCompactHandler(
 		forceMorphCompactRef,
+		strictMorphCompactRef,
 		config,
 	);
+	let modelContextTokens = 128000;
 
 	if (config.fastApplyEnabled) {
 		pi.registerTool(buildMorphFastApplyTool(config, clients));
@@ -922,19 +997,27 @@ export default async function morphExtension(pi) {
 
 	pi.on("session_before_compact", async (event, ctx) => {
 		const forceMorphCompact = forceMorphCompactRef.value;
-		const result = await runMorphCompaction(
-			event,
-			ctx,
-			config,
-			clients,
-			modelContextTokens,
-			{ force: forceMorphCompact },
-		);
-		forceMorphCompactRef.value = false;
-		if (!result) return;
-		return {
-			compaction: result.compaction,
-		};
+		const strictMorphCompact = strictMorphCompactRef.value;
+		try {
+			const result = await runMorphCompaction(
+				event,
+				ctx,
+				config,
+				clients,
+				modelContextTokens,
+				{ force: forceMorphCompact, strict: strictMorphCompact },
+			);
+			forceMorphCompactRef.value = false;
+			strictMorphCompactRef.value = false;
+			if (!result) return;
+			return {
+				compaction: result.compaction,
+			};
+		} catch (error) {
+			forceMorphCompactRef.value = false;
+			strictMorphCompactRef.value = false;
+			throw error;
+		}
 	});
 
 	pi.registerCommand("morph_status", {
@@ -968,8 +1051,8 @@ export default async function morphExtension(pi) {
 	pi.registerCommand("morph-compact", {
 		description:
 			config.routing?.forceMorphCompactCommand !== false
-				? "Trigger Pi compaction immediately and force the Morph compaction path"
-				: "Trigger Pi compaction immediately with Morph auto-compaction integration enabled",
+				? "Trigger compaction immediately and require the Morph compaction path"
+				: "Trigger compaction immediately with Morph auto-compaction integration enabled",
 		handler: morphCompactHandler,
 	});
 }

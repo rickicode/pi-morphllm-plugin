@@ -77,7 +77,7 @@ test("prefers global ~/.pi/agent/morph.json over project files", async () => {
 		JSON.stringify({
 			apiKey: "global-key",
 			baseUrl: "https://global.example.com/",
-			compactEnabled: false,
+			autoCompactEnabled: false,
 		}),
 		"utf8",
 	);
@@ -86,7 +86,7 @@ test("prefers global ~/.pi/agent/morph.json over project files", async () => {
 		JSON.stringify({
 			apiKey: "project-key",
 			baseUrl: "https://project.example.com/",
-			compactEnabled: true,
+			autoCompactEnabled: true,
 			warpGrepTimeoutMs: 12345,
 		}),
 		"utf8",
@@ -103,7 +103,7 @@ test("prefers global ~/.pi/agent/morph.json over project files", async () => {
 	);
 	assert.equal(config.apiKey, "global-key");
 	assert.equal(config.baseUrl, "https://global.example.com");
-	assert.equal(config.compactEnabled, false);
+	assert.equal(config.autoCompactEnabled, false);
 	assert.equal(config.routing.editMode, "force");
 	assert.equal(config.routing.codebaseSearchMode, "force");
 	assert.equal(config.routing.githubSearchMode, "force");
@@ -123,7 +123,7 @@ test("loads config from .pi/morph.json when global config is absent", async () =
 		JSON.stringify({
 			apiKey: "json-key",
 			baseUrl: "https://json.example.com/",
-			compactEnabled: false,
+			autoCompactEnabled: false,
 			warpGrepTimeoutMs: 12345,
 		}),
 		"utf8",
@@ -143,7 +143,7 @@ test("loads config from .pi/morph.json when global config is absent", async () =
 		);
 		assert.equal(config.apiKey, "json-key");
 		assert.equal(config.baseUrl, "https://json.example.com");
-		assert.equal(config.compactEnabled, false);
+		assert.equal(config.autoCompactEnabled, false);
 		assert.equal(config.warpGrepTimeoutMs, 12345);
 		assert.equal(config.routing.editMode, "force");
 		assert.equal(config.routing.codebaseSearchMode, "force");
@@ -161,7 +161,7 @@ test("json config takes precedence over environment variables", async () => {
 		path.join(tempDir, "morph.config.json"),
 		JSON.stringify({
 			baseUrl: "https://json-priority.example.com/",
-			compactEnabled: false,
+			autoCompactEnabled: false,
 			routing: {
 				editMode: "force",
 				fallbackToNativeTools: false,
@@ -177,12 +177,12 @@ test("json config takes precedence over environment variables", async () => {
 			{
 				HOME: tempHome,
 				MORPH_BASE_URL: "https://env.example.com/",
-				MORPH_COMPACT: "true",
+				MORPH_AUTO_COMPACT: "true",
 			},
 			tempDir,
 		);
 		assert.equal(config.baseUrl, "https://json-priority.example.com");
-		assert.equal(config.compactEnabled, false);
+		assert.equal(config.autoCompactEnabled, false);
 		assert.equal(config.routing.editMode, "force");
 		assert.equal(config.routing.fallbackToNativeTools, false);
 	} finally {
@@ -208,7 +208,7 @@ test("ensureMorphConfigFile creates global config by default", async () => {
 		assert.equal(result.path, targetPath);
 		const raw = await readFile(targetPath, "utf8");
 		const json = JSON.parse(raw);
-		assert.equal(json.baseUrl, "https://api.morphllm.com");
+		assert.equal("baseUrl" in json, false);
 		assert.equal(json.routing.editMode, "force");
 		assert.equal(json.routing.codebaseSearchMode, "force");
 		assert.equal(json.routing.githubSearchMode, "force");
