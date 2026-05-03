@@ -896,6 +896,7 @@ async function probeMorphApi(config, clients) {
 
 function buildStatusLines(config, clients, configFile, apiProbeStatus = "not run") {
 	return [
+		`Morph plugin version: ${PLUGIN_VERSION}`,
 		`Morph config: ${config.configPath || configFile.path || "none"}`,
 		`Morph config auto-created: ${Boolean(configFile.created)}`,
 		`Morph API key: ${config.apiKey ? "configured" : "missing"}`,

@@ -217,6 +217,7 @@ test("morph_status reports live API probe result", async () => {
 		});
 
 		assert.equal(notifications[0].message, "Running Morph API live test...");
+		assert.match(notifications[1].message, /Morph plugin version: 0\.1\.4/);
 		assert.match(notifications[1].message, /Morph API live test: ok/);
 	} finally {
 		globalThis.fetch = originalFetch;

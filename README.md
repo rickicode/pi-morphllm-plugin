@@ -165,6 +165,7 @@ Invalid routing mode strings automatically fall back to safe defaults:
 
 Example `/morph_status` fields:
 
+- `Morph plugin version: 0.1.4`
 - `Morph config: ~/.pi/agent/morph.json`
 - `Morph API key: configured`
 - `Morph API key source: single key`, `3 keys (round-robin)`, or `key file: ~/.pi/agent/morph.env` depending on your configuration
