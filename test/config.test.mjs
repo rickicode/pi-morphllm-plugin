@@ -4,67 +4,69 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-async function loadConfigWithEnv(env, cwd = process.cwd()) {
-	const previous = new Map();
-	for (const [key, value] of Object.entries(env)) {
-		previous.set(key, process.env[key]);
-		if (value === undefined) delete process.env[key];
-		else process.env[key] = value;
-	}
-
-	try {
-		const mod = await import(
-			`../extensions/morph/config.js?${Date.now()}-${Math.random()}`
-		);
-		return mod.getMorphConfig(cwd);
-	} finally {
-		for (const [key, value] of previous.entries()) {
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
-	}
+async function loadConfig(cwd = process.cwd()) {
+	const mod = await import(
+		`../extensions/morph/config.js?${Date.now()}-${Math.random()}`
+	);
+	return mod.getMorphConfig(cwd);
 }
 
 test("defaults to public Morph API URL", async () => {
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), "pi-morph-config-"));
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
-	const config = await loadConfigWithEnv(
-		{
-			HOME: tempHome,
-			MORPH_BASE_URL: undefined,
-			MORPH_BASE_API: undefined,
-		},
-		tempDir,
-	);
-	assert.equal(config.baseUrl, "https://api.morphllm.com");
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
+	try {
+		const config = await loadConfig(tempDir);
+		assert.equal(config.baseUrl, "https://api.morphllm.com");
+	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempDir, { recursive: true, force: true });
+	}
 });
 
-test("supports MORPH_BASE_URL override", async () => {
+test("supports baseUrl from JSON config", async () => {
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), "pi-morph-config-"));
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
-	const config = await loadConfigWithEnv(
-		{
-			HOME: tempHome,
-			MORPH_BASE_URL: "https://proxy.example.com/",
-			MORPH_BASE_API: undefined,
-		},
-		tempDir,
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
+	await writeFile(
+		path.join(tempDir, "morph.config.json"),
+		JSON.stringify({ baseUrl: "https://proxy.example.com/" }),
+		"utf8",
 	);
-	assert.equal(config.baseUrl, "https://proxy.example.com");
+	try {
+		const config = await loadConfig(tempDir);
+		assert.equal(config.baseUrl, "https://proxy.example.com");
+	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempDir, { recursive: true, force: true });
+	}
 });
 
-test("supports MORPH_BASE_API alias override", async () => {
+test("supports baseApi alias from JSON config", async () => {
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), "pi-morph-config-"));
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
-	const config = await loadConfigWithEnv(
-		{
-			HOME: tempHome,
-			MORPH_BASE_URL: undefined,
-			MORPH_BASE_API: "https://alias.example.com/base/",
-		},
-		tempDir,
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
+	await writeFile(
+		path.join(tempDir, "morph.config.json"),
+		JSON.stringify({ baseApi: "https://alias.example.com/base/" }),
+		"utf8",
 	);
-	assert.equal(config.baseUrl, "https://alias.example.com/base");
+	try {
+		const config = await loadConfig(tempDir);
+		assert.equal(config.baseUrl, "https://alias.example.com/base");
+	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempDir, { recursive: true, force: true });
+	}
 });
 
 test("prefers global ~/.pi/agent/morph.json over project files", async () => {
@@ -92,26 +94,27 @@ test("prefers global ~/.pi/agent/morph.json over project files", async () => {
 		"utf8",
 	);
 
-	const config = await loadConfigWithEnv(
-		{
-			HOME: tempHome,
-			MORPH_API_KEY: undefined,
-			MORPH_BASE_URL: undefined,
-			MORPH_BASE_API: undefined,
-		},
-		tempDir,
-	);
-	assert.equal(config.apiKey, "global-key");
-	assert.equal(config.baseUrl, "https://global.example.com");
-	assert.equal(config.autoCompactEnabled, false);
-	assert.equal(config.routing.editMode, "force");
-	assert.equal(config.routing.codebaseSearchMode, "force");
-	assert.equal(config.routing.githubSearchMode, "force");
-	assert.equal(config.routing.fallbackToNativeTools, true);
-	assert.equal(
-		config.configPath,
-		path.join(tempHome, ".pi", "agent", "morph.json"),
-	);
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
+	try {
+		const config = await loadConfig(tempDir);
+		assert.equal(config.apiKey, "global-key");
+		assert.equal(config.baseUrl, "https://global.example.com");
+		assert.equal(config.autoCompactEnabled, false);
+		assert.equal(config.routing.editMode, "force");
+		assert.equal(config.routing.codebaseSearchMode, "force");
+		assert.equal(config.routing.githubSearchMode, "force");
+		assert.equal(config.routing.fallbackToNativeTools, true);
+		assert.equal(
+			config.configPath,
+			path.join(tempHome, ".pi", "agent", "morph.json"),
+		);
+	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempDir, { recursive: true, force: true });
+	}
 });
 
 test("loads config from .pi/morph.json when global config is absent", async () => {
@@ -131,16 +134,10 @@ test("loads config from .pi/morph.json when global config is absent", async () =
 
 	const previousCwd = process.cwd();
 	process.chdir(tempDir);
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
 	try {
-		const config = await loadConfigWithEnv(
-			{
-				HOME: tempHome,
-				MORPH_API_KEY: undefined,
-				MORPH_BASE_URL: undefined,
-				MORPH_BASE_API: undefined,
-			},
-			tempDir,
-		);
+		const config = await loadConfig(tempDir);
 		assert.equal(config.apiKey, "json-key");
 		assert.equal(config.baseUrl, "https://json.example.com");
 		assert.equal(config.autoCompactEnabled, false);
@@ -150,11 +147,15 @@ test("loads config from .pi/morph.json when global config is absent", async () =
 		assert.equal(config.routing.githubSearchMode, "force");
 		assert.equal(config.configPath, path.join(tempDir, ".pi", "morph.json"));
 	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
 		process.chdir(previousCwd);
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempDir, { recursive: true, force: true });
 	}
 });
 
-test("json config takes precedence over environment variables", async () => {
+test("json config is the only source of truth", async () => {
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), "pi-morph-config-"));
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
 	await writeFile(
@@ -172,21 +173,20 @@ test("json config takes precedence over environment variables", async () => {
 
 	const previousCwd = process.cwd();
 	process.chdir(tempDir);
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
 	try {
-		const config = await loadConfigWithEnv(
-			{
-				HOME: tempHome,
-				MORPH_BASE_URL: "https://env.example.com/",
-				MORPH_AUTO_COMPACT: "true",
-			},
-			tempDir,
-		);
+		const config = await loadConfig(tempDir);
 		assert.equal(config.baseUrl, "https://json-priority.example.com");
 		assert.equal(config.autoCompactEnabled, false);
 		assert.equal(config.routing.editMode, "force");
 		assert.equal(config.routing.fallbackToNativeTools, false);
 	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
 		process.chdir(previousCwd);
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempDir, { recursive: true, force: true });
 	}
 });
 
@@ -199,8 +199,6 @@ test("ensureMorphConfigFile creates global config by default", async () => {
 	const targetPath = path.join(tempHome, ".pi", "agent", "morph.json");
 
 	const previousHome = process.env.HOME;
-	const previousConfig = process.env.MORPH_CONFIG;
-	delete process.env.MORPH_CONFIG;
 	process.env.HOME = tempHome;
 	try {
 		const result = mod.ensureMorphConfigFile(tempDir);
@@ -212,12 +210,9 @@ test("ensureMorphConfigFile creates global config by default", async () => {
 		assert.equal(json.routing.editMode, "force");
 		assert.equal(json.routing.codebaseSearchMode, "force");
 		assert.equal(json.routing.githubSearchMode, "force");
-		assert.equal(json.routing.forceMorphCompactCommand, true);
 	} finally {
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
-		else process.env.MORPH_CONFIG = previousConfig;
 		await rm(tempHome, { recursive: true, force: true });
 		await rm(tempDir, { recursive: true, force: true });
 	}
@@ -240,17 +235,16 @@ test("invalid routing modes fall back to safe defaults", async () => {
 
 	const previousCwd = process.cwd();
 	process.chdir(tempDir);
+	const previousHome = process.env.HOME;
+	process.env.HOME = tempHome;
 	try {
-		const config = await loadConfigWithEnv(
-			{
-				HOME: tempHome,
-			},
-			tempDir,
-		);
+		const config = await loadConfig(tempDir);
 		assert.equal(config.routing.editMode, "force");
 		assert.equal(config.routing.codebaseSearchMode, "force");
 		assert.equal(config.routing.githubSearchMode, "force");
 	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
 		process.chdir(previousCwd);
 		await rm(tempHome, { recursive: true, force: true });
 		await rm(tempDir, { recursive: true, force: true });

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-03
+
+### Changed
+- Switched the plugin to file-only configuration and removed runtime environment variable support so Morph settings always come from JSON config files.
+- Added a live Morph API probe to `/morph_status`, including clearer failure categories for authentication, timeout, and network/base URL errors.
+- Simplified manual compaction semantics so `/morph-compact` is always strict and Morph-only, while automatic compaction remains Morph-first with Pi fallback.
+- Removed the `routing.forceMorphCompactCommand` setting from runtime config, interactive settings, tests, and documentation.
+- Updated package metadata so the published author is `rickicode`.
+- Bumped the package and internal plugin version to `0.1.4`.
+
 ## [0.1.3] - 2026-05-03
 
 ### Changed

@@ -27,7 +27,7 @@ import {
 	normalizeCodeEditInput,
 } from "./utils.js";
 
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.1.4";
 
 function createApiKeySelector(config) {
 	const apiKeys = config.apiKeys || [];
@@ -63,7 +63,13 @@ function createRotatingMorphClient(ClientClass, buildOptions, selectApiKey) {
 
 async function createClients(config) {
 	if (!config.apiKeys?.length) {
-		return { morph: null, warpGrep: null, compact: null, loadError: null };
+		return {
+			morph: null,
+			warpGrep: null,
+			compact: null,
+			loadError: null,
+			selectApiKey: () => null,
+		};
 	}
 
 	try {
@@ -787,10 +793,9 @@ function shouldForceGithubSearch(config) {
 	return config.routing?.githubSearchMode === "force";
 }
 
-function createMorphCompactHandler(forceMorphCompactRef, strictMorphCompactRef, config) {
+function createMorphCompactHandler(forceMorphCompactRef, strictMorphCompactRef) {
 	return async (_args, ctx) => {
-		forceMorphCompactRef.value =
-			config.routing?.forceMorphCompactCommand !== false;
+		forceMorphCompactRef.value = true;
 		strictMorphCompactRef.value = true;
 		ctx.compact({
 			onComplete: (result) => {
@@ -812,9 +817,7 @@ function createMorphCompactHandler(forceMorphCompactRef, strictMorphCompactRef, 
 		});
 		if (ctx.hasUI) {
 			ctx.ui.notify(
-				config.routing?.forceMorphCompactCommand !== false
-					? "Triggered Morph compaction for the current session."
-					: "Triggered Pi compaction with Morph auto-compaction rules for the current session.",
+				"Triggered Morph compaction for the current session.",
 				"info",
 			);
 		}
@@ -843,12 +846,61 @@ function formatMorphFooterStatus(config) {
 	return "MorphLLM (0 keys)";
 }
 
-function buildStatusLines(config, clients, configFile) {
+function formatMorphProbeError(error) {
+	const message = error instanceof Error ? error.message : String(error);
+	const normalized = message.toLowerCase();
+
+	if (normalized.includes("401") || normalized.includes("403")) {
+		return `failed (authentication error: ${message})`;
+	}
+	if (
+		normalized.includes("timeout") ||
+		normalized.includes("timed out") ||
+		normalized.includes("abort")
+	) {
+		return `failed (request timeout: ${message})`;
+	}
+	if (
+		normalized.includes("fetch failed") ||
+		normalized.includes("econnrefused") ||
+		normalized.includes("enotfound") ||
+		normalized.includes("getaddrinfo") ||
+		normalized.includes("network")
+	) {
+		return `failed (network/base URL error: ${message})`;
+	}
+	return `failed (unexpected error: ${message})`;
+}
+
+async function probeMorphApi(config, clients) {
+	if (!config.apiKey) {
+		return "skipped (missing API key)";
+	}
+	if (clients.loadError || !clients.compact) {
+		return "skipped (SDK unavailable)";
+	}
+
+	try {
+		const result = await clients.compact.compact({
+			input: "status probe",
+			compressionRatio: 0.9,
+			preserveRecent: 0,
+		});
+		return typeof result?.output === "string"
+			? "ok"
+			: "failed (unexpected response shape)";
+	} catch (error) {
+		return formatMorphProbeError(error);
+	}
+}
+
+function buildStatusLines(config, clients, configFile, apiProbeStatus = "not run") {
 	return [
 		`Morph config: ${config.configPath || configFile.path || "none"}`,
 		`Morph config auto-created: ${Boolean(configFile.created)}`,
 		`Morph API key: ${config.apiKey ? "configured" : "missing"}`,
 		`Morph API key source: ${formatApiKeySource(config)}`,
+		`Morph API live test: ${apiProbeStatus}`,
 		`Morph SDK: ${clients.loadError ? `unavailable (${clients.loadError})` : "ready"}`,
 		`Morph base URL: ${config.baseUrl}`,
 		`Morph FastApply enabled: ${config.fastApplyEnabled}`,
@@ -865,7 +917,6 @@ function buildStatusLines(config, clients, configFile) {
 		`Morph-first local search guidance active: ${config.routing?.codebaseSearchMode === "force"}`,
 		`Morph-first GitHub search guidance active: ${config.routing?.githubSearchMode === "force"}`,
 		`Fallback to native tools: ${config.routing?.fallbackToNativeTools !== false}`,
-		`Force /morph-compact: ${config.routing?.forceMorphCompactCommand !== false}`,
 	];
 }
 
@@ -879,7 +930,6 @@ async function updateMorphSettingInteractively(ctx, cwd) {
 		"Routing codebase search mode",
 		"Routing GitHub search mode",
 		"Fallback to native tools",
-		"Force /morph-compact",
 	]);
 	if (!choice) return null;
 
@@ -891,16 +941,6 @@ async function updateMorphSettingInteractively(ctx, cwd) {
 			cwd,
 		);
 		return `Updated ${path}: routing.fallbackToNativeTools = ${next}`;
-	}
-
-	if (choice === "Force /morph-compact") {
-		const next = await ctx.ui.select("Force /morph-compact", ["true", "false"]);
-		if (!next) return null;
-		const path = saveMorphConfig(
-			{ routing: { forceMorphCompactCommand: next === "true" } },
-			cwd,
-		);
-		return `Updated ${path}: routing.forceMorphCompactCommand = ${next}`;
 	}
 
 	const next = await ctx.ui.select(choice, ["prefer", "strong", "force"]);
@@ -924,7 +964,6 @@ export default async function morphExtension(pi) {
 	const morphCompactHandler = createMorphCompactHandler(
 		forceMorphCompactRef,
 		strictMorphCompactRef,
-		config,
 	);
 	let modelContextTokens = 128000;
 
@@ -1021,9 +1060,13 @@ export default async function morphExtension(pi) {
 	});
 
 	pi.registerCommand("morph_status", {
-		description: "Show Morph plugin configuration status",
+		description: "Show Morph plugin configuration status and test the configured Morph API key",
 		handler: async (_args, ctx) => {
-			const lines = buildStatusLines(config, clients, configFile);
+			if (ctx.hasUI) {
+				ctx.ui.notify("Running Morph API live test...", "info");
+			}
+			const apiProbeStatus = await probeMorphApi(config, clients);
+			const lines = buildStatusLines(config, clients, configFile, apiProbeStatus);
 			const message = formatStatusMessage(lines);
 			if (ctx.hasUI) {
 				ctx.ui.notify(message, "info");
@@ -1049,10 +1092,7 @@ export default async function morphExtension(pi) {
 	});
 
 	pi.registerCommand("morph-compact", {
-		description:
-			config.routing?.forceMorphCompactCommand !== false
-				? "Trigger compaction immediately and require the Morph compaction path"
-				: "Trigger compaction immediately with Morph auto-compaction integration enabled",
+		description: "Trigger compaction immediately and require the Morph compaction path",
 		handler: morphCompactHandler,
 	});
 }

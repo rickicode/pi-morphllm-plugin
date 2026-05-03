@@ -37,13 +37,11 @@ function parseEnumValue(value, allowedValues, fallback) {
 }
 
 function getConfigCandidatePaths(cwd = process.cwd()) {
-	const configuredPath = process.env.MORPH_CONFIG;
 	return [
-		configuredPath,
 		path.resolve(os.homedir(), ".pi/agent/morph.json"),
 		path.resolve(cwd, ".pi/morph.json"),
 		path.resolve(cwd, "morph.config.json"),
-	].filter(Boolean);
+	];
 }
 
 function loadJsonConfig(cwd = process.cwd()) {
@@ -61,11 +59,8 @@ function loadJsonConfig(cwd = process.cwd()) {
 	return { path: null, data: {} };
 }
 
-function resolveWritableConfigPath(cwd = process.cwd()) {
-	return (
-		process.env.MORPH_CONFIG ||
-		path.resolve(os.homedir(), ".pi/agent/morph.json")
-	);
+function resolveWritableConfigPath() {
+	return path.resolve(os.homedir(), ".pi/agent/morph.json");
 }
 
 function resolveConfigRelativePath(configPath, targetPath, cwd = process.cwd()) {
@@ -111,7 +106,6 @@ function buildDefaultJsonConfig() {
 			codebaseSearchMode: "force",
 			githubSearchMode: "force",
 			fallbackToNativeTools: true,
-			forceMorphCompactCommand: true,
 		},
 		compactContextThreshold: 0.7,
 		compactPreserveRecent: 1,
@@ -162,20 +156,19 @@ export function saveMorphConfig(configPatch, cwd = process.cwd()) {
 export function getMorphConfig(cwd = process.cwd()) {
 	const fileConfig = loadJsonConfig(cwd);
 	const json = fileConfig.data || {};
-	const envBaseUrl = process.env.MORPH_BASE_URL || process.env.MORPH_BASE_API;
-	const configuredBaseUrl = json.baseUrl || json.baseApi || envBaseUrl;
+	const configuredBaseUrl = json.baseUrl || json.baseApi;
 	const morphBaseUrl = trimTrailingSlash(
 		configuredBaseUrl || DEFAULT_MORPH_BASE_URL,
 	);
 
 	const routing = json.routing || {};
-	const singleApiKey = json.apiKey ?? process.env.MORPH_API_KEY;
+	const singleApiKey = json.apiKey;
 	const useMultipleApiKeys =
 		typeof singleApiKey === "string" &&
 		singleApiKey.trim().toLowerCase() === MULTI_API_KEY_SENTINEL;
 	const configuredApiKeyFile = useMultipleApiKeys
-		? json.apiKeyFile ?? process.env.MORPH_API_KEY_FILE ?? DEFAULT_MULTI_API_KEY_FILE
-		: json.apiKeyFile ?? process.env.MORPH_API_KEY_FILE ?? null;
+		? json.apiKeyFile ?? DEFAULT_MULTI_API_KEY_FILE
+		: json.apiKeyFile ?? null;
 	const resolvedApiKeyFile = resolveConfigRelativePath(
 		fileConfig.path,
 		configuredApiKeyFile,
@@ -195,31 +188,19 @@ export function getMorphConfig(cwd = process.cwd()) {
 		apiKeys: uniqueApiKeys,
 		apiKeyFile: resolvedApiKeyFile,
 		apiKeyStrategy: parseEnumValue(
-			json.apiKeyStrategy ?? process.env.MORPH_API_KEY_STRATEGY,
+			json.apiKeyStrategy,
 			["random", "round-robin"],
 			"round-robin",
 		),
 		baseUrl: morphBaseUrl,
 		fastApplyEnabled: parseBoolValue(
-			json.editEnabled ?? json.fastApplyEnabled ?? process.env.MORPH_EDIT,
+			json.editEnabled ?? json.fastApplyEnabled,
 			true,
 		),
-		warpgrepEnabled: parseBoolValue(
-			json.warpgrepEnabled ?? process.env.MORPH_WARPGREP,
-			true,
-		),
-		warpgrepGithubEnabled: parseBoolValue(
-			json.warpgrepGithubEnabled ?? process.env.MORPH_WARPGREP_GITHUB,
-			true,
-		),
-		autoCompactEnabled: parseBoolValue(
-			json.autoCompactEnabled ?? process.env.MORPH_AUTO_COMPACT,
-			true,
-		),
-		allowReadonlyAgents: parseBoolValue(
-			json.allowReadonlyAgents ?? process.env.MORPH_ALLOW_READONLY_AGENTS,
-			false,
-		),
+		warpgrepEnabled: parseBoolValue(json.warpgrepEnabled, true),
+		warpgrepGithubEnabled: parseBoolValue(json.warpgrepGithubEnabled, true),
+		autoCompactEnabled: parseBoolValue(json.autoCompactEnabled, true),
+		allowReadonlyAgents: parseBoolValue(json.allowReadonlyAgents, false),
 		routing: {
 			editMode: parseEnumValue(
 				routing.editMode,
@@ -240,41 +221,24 @@ export function getMorphConfig(cwd = process.cwd()) {
 				routing.fallbackToNativeTools,
 				true,
 			),
-			forceMorphCompactCommand: parseBoolValue(
-				routing.forceMorphCompactCommand,
-				true,
-			),
 		},
 		compactContextThreshold: parseNumberValue(
-			json.compactContextThreshold ??
-				process.env.MORPH_AUTO_COMPACT_CONTEXT_THRESHOLD,
+			json.compactContextThreshold,
 			0.7,
 		),
-		compactPreserveRecent: parseNumberValue(
-			json.compactPreserveRecent ??
-				process.env.MORPH_AUTO_COMPACT_PRESERVE_RECENT,
-			1,
-		),
-		compactRatio: parseNumberValue(
-			json.compactRatio ?? process.env.MORPH_AUTO_COMPACT_RATIO,
-			0.3,
-		),
+		compactPreserveRecent: parseNumberValue(json.compactPreserveRecent, 1),
+		compactRatio: parseNumberValue(json.compactRatio, 0.3),
 		compactTokenLimit:
 			json.compactTokenLimit !== undefined
 				? parseNumberValue(json.compactTokenLimit, null)
-				: process.env.MORPH_AUTO_COMPACT_TOKEN_LIMIT
-					? parseNumberValue(process.env.MORPH_AUTO_COMPACT_TOKEN_LIMIT, null)
-					: null,
-		timeoutMs: parseNumberValue(
-			json.timeoutMs ?? process.env.MORPH_TIMEOUT,
-			DEFAULT_TIMEOUT_MS,
-		),
+				: null,
+		timeoutMs: parseNumberValue(json.timeoutMs, DEFAULT_TIMEOUT_MS),
 		warpGrepTimeoutMs: parseNumberValue(
-			json.warpGrepTimeoutMs ?? process.env.MORPH_WARPGREP_TIMEOUT,
+			json.warpGrepTimeoutMs,
 			DEFAULT_WARPGREP_TIMEOUT_MS,
 		),
 		compactTimeoutMs: parseNumberValue(
-			json.compactTimeoutMs ?? process.env.MORPH_AUTO_COMPACT_TIMEOUT,
+			json.compactTimeoutMs,
 			DEFAULT_COMPACT_TIMEOUT_MS,
 		),
 	};

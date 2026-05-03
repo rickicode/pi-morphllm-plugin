@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -12,43 +12,11 @@ import {
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 
-async function loadExtensionWithEnv(env = {}) {
-	const previous = {};
-	for (const [key, value] of Object.entries(env)) {
-		previous[key] = process.env[key];
-		if (value === undefined) delete process.env[key];
-		else process.env[key] = String(value);
-	}
-
-	try {
-		const module = await import(
-			`../extensions/morph/index.js?test=${Date.now()}-${Math.random()}`
-		);
-		return module.default;
-	} finally {
-		for (const [key] of Object.entries(env)) {
-			if (previous[key] === undefined) delete process.env[key];
-			else process.env[key] = previous[key];
-		}
-	}
-}
-
-async function withEnv(env, fn) {
-	const previous = {};
-	for (const [key, value] of Object.entries(env)) {
-		previous[key] = process.env[key];
-		if (value === undefined) delete process.env[key];
-		else process.env[key] = String(value);
-	}
-
-	try {
-		return await fn();
-	} finally {
-		for (const [key] of Object.entries(env)) {
-			if (previous[key] === undefined) delete process.env[key];
-			else process.env[key] = previous[key];
-		}
-	}
+async function loadExtension() {
+	const module = await import(
+		`../extensions/morph/index.js?test=${Date.now()}-${Math.random()}`
+	);
+	return module.default;
 }
 
 function createFakePi() {
@@ -76,15 +44,11 @@ test("before_agent_start does not duplicate Morph routing hints", async () => {
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
 	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
 	const previousHome = process.env.HOME;
-	const previousConfig = process.env.MORPH_CONFIG;
 	const previousCwd = process.cwd();
-	delete process.env.MORPH_CONFIG;
 	process.env.HOME = tempHome;
 	process.chdir(tempCwd);
 	try {
-		const extension = await loadExtensionWithEnv({
-			MORPH_API_KEY: undefined,
-		});
+		const extension = await loadExtension();
 		const pi = createFakePi();
 		await extension(pi);
 
@@ -110,18 +74,13 @@ test("before_agent_start does not duplicate Morph routing hints", async () => {
 		process.chdir(previousCwd);
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
-		else process.env.MORPH_CONFIG = previousConfig;
 		await rm(tempHome, { recursive: true, force: true });
 		await rm(tempCwd, { recursive: true, force: true });
 	}
 });
 
 test("session_before_compact reads messages from branchEntries", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-		MORPH_AUTO_COMPACT: "true",
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -157,15 +116,11 @@ test("extension auto-creates global config on load when none exists", async () =
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
 	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
 	const previousHome = process.env.HOME;
-	const previousConfig = process.env.MORPH_CONFIG;
 	const previousCwd = process.cwd();
-	delete process.env.MORPH_CONFIG;
 	process.env.HOME = tempHome;
 	process.chdir(tempCwd);
 	try {
-		const extension = await loadExtensionWithEnv({
-			MORPH_API_KEY: undefined,
-		});
+		const extension = await loadExtension();
 		const pi = createFakePi();
 		await extension(pi);
 		const configPath = path.join(tempHome, ".pi", "agent", "morph.json");
@@ -187,17 +142,13 @@ test("extension auto-creates global config on load when none exists", async () =
 		process.chdir(previousCwd);
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
-		else process.env.MORPH_CONFIG = previousConfig;
 		await rm(tempHome, { recursive: true, force: true });
 		await rm(tempCwd, { recursive: true, force: true });
 	}
 });
 
 test("morph_fastapply tool exposes dry_run parameter", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -207,9 +158,7 @@ test("morph_fastapply tool exposes dry_run parameter", async () => {
 });
 
 test("morph_status command is safe without UI", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -228,10 +177,163 @@ test("morph_status command is safe without UI", async () => {
 	);
 });
 
+test("morph_status reports live API probe result", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousCwd = process.cwd();
+	process.env.HOME = tempHome;
+	process.chdir(tempCwd);
+	await mkdir(path.join(tempHome, ".pi", "agent"), { recursive: true });
+	await writeFile(
+		path.join(tempHome, ".pi", "agent", "morph.json"),
+		`${JSON.stringify({ apiKey: "test-key" }, null, 2)}\n`,
+		"utf8",
+	);
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () =>
+		new Response(JSON.stringify({ output: "ok" }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+
+	try {
+		const extension = await loadExtension();
+		const pi = createFakePi();
+		await extension(pi);
+
+		const command = pi.commands.get("morph_status");
+		assert.ok(command);
+
+		const notifications = [];
+		await command.handler("", {
+			hasUI: true,
+			ui: {
+				notify(message, level) {
+					notifications.push({ message, level });
+				},
+			},
+		});
+
+		assert.equal(notifications[0].message, "Running Morph API live test...");
+		assert.match(notifications[1].message, /Morph API live test: ok/);
+	} finally {
+		globalThis.fetch = originalFetch;
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
+});
+
+test("morph_status classifies authentication probe failures", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousCwd = process.cwd();
+	process.env.HOME = tempHome;
+	process.chdir(tempCwd);
+	await mkdir(path.join(tempHome, ".pi", "agent"), { recursive: true });
+	await writeFile(
+		path.join(tempHome, ".pi", "agent", "morph.json"),
+		`${JSON.stringify({ apiKey: "bad-key" }, null, 2)}\n`,
+		"utf8",
+	);
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () =>
+		new Response("unauthorized", {
+			status: 401,
+			headers: { "Content-Type": "text/plain" },
+		});
+
+	try {
+		const extension = await loadExtension();
+		const pi = createFakePi();
+		await extension(pi);
+
+		const command = pi.commands.get("morph_status");
+		assert.ok(command);
+
+		const notifications = [];
+		await command.handler("", {
+			hasUI: true,
+			ui: {
+				notify(message, level) {
+					notifications.push({ message, level });
+				},
+			},
+		});
+
+		assert.match(
+			notifications[1].message,
+			/Morph API live test: failed \(authentication error:/,
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
+});
+
+test("morph_status classifies network probe failures", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousCwd = process.cwd();
+	process.env.HOME = tempHome;
+	process.chdir(tempCwd);
+	await mkdir(path.join(tempHome, ".pi", "agent"), { recursive: true });
+	await writeFile(
+		path.join(tempHome, ".pi", "agent", "morph.json"),
+		`${JSON.stringify({ apiKey: "test-key" }, null, 2)}\n`,
+		"utf8",
+	);
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => {
+		throw new Error("fetch failed");
+	};
+
+	try {
+		const extension = await loadExtension();
+		const pi = createFakePi();
+		await extension(pi);
+
+		const command = pi.commands.get("morph_status");
+		assert.ok(command);
+
+		const notifications = [];
+		await command.handler("", {
+			hasUI: true,
+			ui: {
+				notify(message, level) {
+					notifications.push({ message, level });
+				},
+			},
+		});
+
+		assert.match(
+			notifications[1].message,
+			/Morph API live test: failed \(network\/base URL error:/,
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
+});
+
 test("extension still registers Morph tools without API key", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -291,9 +393,7 @@ test("createAgentSession loads Morph tools and Morph prompt guidance", async () 
 });
 
 test("morph-compact command triggers ctx.compact", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -317,9 +417,7 @@ test("morph-compact command triggers ctx.compact", async () => {
 });
 
 test("morph-compact requires Morph compaction instead of silently falling back", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -359,118 +457,44 @@ test("morph-compact requires Morph compaction instead of silently falling back",
 	);
 });
 
-test("morph-compact still forces Morph when auto compaction is disabled", async () => {
+test("morph-compact always forces Morph when auto compaction is disabled", async () => {
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
 	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
 	const previousHome = process.env.HOME;
-	const previousConfig = process.env.MORPH_CONFIG;
 	const previousCwd = process.cwd();
 	process.chdir(tempCwd);
-	const configPath = path.join(tempCwd, "morph.config.json");
 	await writeFile(
-		configPath,
+		path.join(tempCwd, "morph.config.json"),
 		`${JSON.stringify({ apiKey: "test-key", autoCompactEnabled: false }, null, 2)}\n`,
 		"utf8",
 	);
-	process.env.MORPH_CONFIG = configPath;
 	process.env.HOME = tempHome;
 	try {
-		await withEnv(
-			{
-				MORPH_API_KEY: undefined,
-				MORPH_AUTO_COMPACT: undefined,
-			},
-			async () => {
-				const extension = await loadExtensionWithEnv();
-				const pi = createFakePi();
-				await extension(pi);
+		const extension = await loadExtension();
+		const pi = createFakePi();
+		await extension(pi);
 
-				const compactCommand = pi.commands.get("morph-compact");
-				const compactHandler = pi.handlers.get("session_before_compact");
-				assert.ok(compactCommand);
-				assert.ok(compactHandler);
+		const compactCommand = pi.commands.get("morph-compact");
+		const compactHandler = pi.handlers.get("session_before_compact");
+		assert.ok(compactCommand);
+		assert.ok(compactHandler);
 
-				await compactCommand.handler("", {
-					hasUI: false,
-					compact() {},
-					ui: { notify() {} },
-				});
+		await compactCommand.handler("", {
+			hasUI: false,
+			compact() {},
+			ui: { notify() {} },
+		});
 
-				await assert.rejects(
-					() =>
-						compactHandler(
-							{
-								branchEntries: [
-									{
-										type: "message",
-										message: {
-											role: "user",
-											content: [{ type: "text", text: "small message" }],
-										},
-									},
-								],
-								preparation: {
-									firstKeptEntryId: "abc",
-									tokensBefore: 100,
-								},
-							},
-							{
-								hasUI: false,
-								ui: { notify() {} },
-							},
-						),
-					/Conversation is below the Morph compaction threshold/,
-				);
-			},
-		);
-	} finally {
-		process.chdir(previousCwd);
-		if (previousHome === undefined) delete process.env.HOME;
-		else process.env.HOME = previousHome;
-		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
-		else process.env.MORPH_CONFIG = previousConfig;
-		await rm(tempHome, { recursive: true, force: true });
-		await rm(tempCwd, { recursive: true, force: true });
-	}
-});
-
-test("auto compaction skips Morph when auto compaction is disabled", async () => {
-	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
-	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
-	const previousHome = process.env.HOME;
-	const previousConfig = process.env.MORPH_CONFIG;
-	const previousCwd = process.cwd();
-	process.chdir(tempCwd);
-	const configPath = path.join(tempCwd, "morph.config.json");
-	await writeFile(
-		configPath,
-		`${JSON.stringify({ apiKey: "test-key", autoCompactEnabled: false }, null, 2)}\n`,
-		"utf8",
-	);
-	process.env.MORPH_CONFIG = configPath;
-	process.env.HOME = tempHome;
-	try {
-		await withEnv(
-			{
-				MORPH_API_KEY: undefined,
-				MORPH_AUTO_COMPACT: undefined,
-			},
-			async () => {
-				const extension = await loadExtensionWithEnv();
-				const pi = createFakePi();
-				await extension(pi);
-
-				const compactHandler = pi.handlers.get("session_before_compact");
-				assert.ok(compactHandler);
-
-				const result = await compactHandler(
+		await assert.rejects(
+			() =>
+				compactHandler(
 					{
 						branchEntries: [
 							{
 								type: "message",
 								message: {
 									role: "user",
-									content: [{ type: "text", text: "hello".repeat(5000) }],
+									content: [{ type: "text", text: "small message" }],
 								},
 							},
 						],
@@ -483,17 +507,65 @@ test("auto compaction skips Morph when auto compaction is disabled", async () =>
 						hasUI: false,
 						ui: { notify() {} },
 					},
-				);
-
-				assert.equal(result, undefined);
-			},
+				),
+			/Conversation is below the Morph compaction threshold/,
 		);
 	} finally {
 		process.chdir(previousCwd);
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
-		else process.env.MORPH_CONFIG = previousConfig;
+		await rm(tempHome, { recursive: true, force: true });
+		await rm(tempCwd, { recursive: true, force: true });
+	}
+});
+
+test("auto compaction skips Morph when auto compaction is disabled", async () => {
+	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
+	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
+	const previousHome = process.env.HOME;
+	const previousCwd = process.cwd();
+	process.chdir(tempCwd);
+	await writeFile(
+		path.join(tempCwd, "morph.config.json"),
+		`${JSON.stringify({ apiKey: "test-key", autoCompactEnabled: false }, null, 2)}\n`,
+		"utf8",
+	);
+	process.env.HOME = tempHome;
+	try {
+		const extension = await loadExtension();
+		const pi = createFakePi();
+		await extension(pi);
+
+		const compactHandler = pi.handlers.get("session_before_compact");
+		assert.ok(compactHandler);
+
+		const result = await compactHandler(
+			{
+				branchEntries: [
+					{
+						type: "message",
+						message: {
+							role: "user",
+							content: [{ type: "text", text: "hello".repeat(5000) }],
+						},
+					},
+				],
+				preparation: {
+					firstKeptEntryId: "abc",
+					tokensBefore: 100,
+				},
+			},
+			{
+				hasUI: false,
+				ui: { notify() {} },
+			},
+		);
+
+		assert.equal(result, undefined);
+	} finally {
+		process.chdir(previousCwd);
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
 		await rm(tempHome, { recursive: true, force: true });
 		await rm(tempCwd, { recursive: true, force: true });
 	}
@@ -506,9 +578,7 @@ test("force edit mode keeps native edit and write available", async () => {
 	try {
 		await writeFile(path.join(tempDir, "existing.txt"), "hello", "utf8");
 
-		const extension = await loadExtensionWithEnv({
-			MORPH_API_KEY: undefined,
-		});
+		const extension = await loadExtension();
 		const pi = createFakePi();
 		await extension(pi);
 
@@ -533,9 +603,7 @@ test("force edit mode keeps native edit and write available", async () => {
 });
 
 test("force search modes keep native search tools available", async () => {
-	const extension = await loadExtensionWithEnv({
-		MORPH_API_KEY: undefined,
-	});
+	const extension = await loadExtension();
 	const pi = createFakePi();
 	await extension(pi);
 
@@ -559,15 +627,11 @@ test("morph_settings updates routing config through interactive flow", async () 
 	const tempHome = await mkdtemp(path.join(os.tmpdir(), "pi-morph-home-"));
 	const tempCwd = await mkdtemp(path.join(os.tmpdir(), "pi-morph-cwd-"));
 	const previousHome = process.env.HOME;
-	const previousConfig = process.env.MORPH_CONFIG;
 	const previousCwd = process.cwd();
-	delete process.env.MORPH_CONFIG;
 	process.env.HOME = tempHome;
 	process.chdir(tempCwd);
 	try {
-		const extension = await loadExtensionWithEnv({
-			MORPH_API_KEY: undefined,
-		});
+		const extension = await loadExtension();
 		const pi = createFakePi();
 		await extension(pi);
 
@@ -594,13 +658,14 @@ test("morph_settings updates routing config through interactive flow", async () 
 		assert.equal(json.routing.editMode, "strong");
 		assert.equal(notifications.length, 2);
 		assert.match(notifications[0].message, /routing\.editMode = strong/);
-		assert.match(notifications[1].message, /refresh Morph clients if credentials or key files changed/);
+		assert.match(
+			notifications[1].message,
+			/refresh Morph clients if credentials or key files changed/,
+		);
 	} finally {
 		process.chdir(previousCwd);
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		if (previousConfig === undefined) delete process.env.MORPH_CONFIG;
-		else process.env.MORPH_CONFIG = previousConfig;
 		await rm(tempHome, { recursive: true, force: true });
 		await rm(tempCwd, { recursive: true, force: true });
 	}

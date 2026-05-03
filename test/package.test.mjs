@@ -15,7 +15,7 @@ test("package manifest exposes Pi extension entry and prompt", async () => {
 
 test("package manifest includes publish-facing metadata", async () => {
 	const pkg = await readJson(new URL("../package.json", import.meta.url));
-	assert.equal(pkg.author, "Ricki");
+	assert.equal(pkg.author, "rickicode");
 	assert.equal(pkg.homepage, "https://github.com/rickicode/pi-morphllm-plugin");
 	assert.equal(pkg.bugs.url, "https://github.com/rickicode/pi-morphllm-plugin/issues");
 	assert.equal(pkg.repository.type, "git");
@@ -26,14 +26,16 @@ test("package manifest includes publish-facing metadata", async () => {
 	assert.equal(pkg.engines.node, ">=20");
 });
 
-test("README documents custom Morph base URL support", async () => {
+test("README documents file-based custom Morph base URL support", async () => {
 	const readme = await readFile(
 		new URL("../README.md", import.meta.url),
 		"utf8",
 	);
-	assert.match(readme, /MORPH_BASE_URL/);
-	assert.match(readme, /MORPH_BASE_API/);
+	assert.match(readme, /baseUrl/);
+	assert.match(readme, /baseApi/);
 	assert.match(readme, /https:\/\/api\.morphllm\.com/);
+	assert.doesNotMatch(readme, /MORPH_BASE_URL/);
+	assert.doesNotMatch(readme, /MORPH_BASE_API/);
 });
 
 test("README documents package-first Pi usage", async () => {
@@ -56,7 +58,6 @@ test("README documents package-first Pi usage", async () => {
 	assert.match(readme, /auto-creates that global file on first runtime load/i);
 	assert.match(readme, /Installing the package alone does not create the file/);
 	assert.match(readme, /routing\.editMode/);
-	assert.match(readme, /routing\.forceMorphCompactCommand/);
 	assert.match(readme, /Morph FastApply-first guidance active: true/);
 	assert.match(readme, /Morph-first local search guidance active: true/);
 	assert.match(readme, /Morph-first GitHub search guidance active: true/);

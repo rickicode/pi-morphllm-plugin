@@ -1,6 +1,6 @@
 # pi-morphllm-plugin
 
-Pi runtime extension package for Morph tools and compaction, with support for custom Morph base URLs and API endpoints.
+Pi runtime extension package for Morph tools and compaction, using file-based configuration for consistent setup.
 
 Made by rickicode.
 
@@ -12,7 +12,7 @@ This package is intentionally not a thin skill-only package. It installs as a no
 - `warpgrep_codebase_search` for local exploratory code search
 - `warpgrep_github_search` for public GitHub source lookup
 - Morph compaction integration for large conversations
-- `MORPH_BASE_URL` / `MORPH_BASE_API` override support
+- File-based `baseUrl` / `baseApi` endpoint configuration
 - Single-key and multiple-key Morph API configuration
 - Prompt-level Morph-first routing guidance without blocking native Pi tools
 
@@ -67,7 +67,6 @@ The easiest setup is a JSON file.
 
 Pi Morph looks for config in this order:
 
-- `MORPH_CONFIG` if you want to point at a custom JSON file
 - `~/.pi/agent/morph.json` as the default global Pi config
 - `.pi/morph.json` in the current project
 - `morph.config.json` in the current project
@@ -99,8 +98,7 @@ Example config:
     "editMode": "force",
     "codebaseSearchMode": "force",
     "githubSearchMode": "force",
-    "fallbackToNativeTools": true,
-    "forceMorphCompactCommand": true
+    "fallbackToNativeTools": true
   },
   "compactContextThreshold": 0.7,
   "compactPreserveRecent": 1,
@@ -141,7 +139,7 @@ Supported strategies:
 The key file parser also ignores blank lines and `#` comments.
 If a line contains pipe-delimited metadata like `name|label|sk-key`, Pi Morph uses the third field as the API key.
 
-JSON values take precedence over environment variables.
+All runtime settings come from JSON config files only.
 
 Routing config lives inside `morph.json`:
 
@@ -149,7 +147,6 @@ Routing config lives inside `morph.json`:
 - `routing.codebaseSearchMode` - `prefer`, `strong`, or `force` for prompt-level local WarpGrep guidance; default is `force`
 - `routing.githubSearchMode` - `prefer`, `strong`, or `force` for prompt-level public GitHub WarpGrep guidance; default is `force`
 - `routing.fallbackToNativeTools` - when `true`, Morph tool failures explicitly fall back to native Pi tools
-- `routing.forceMorphCompactCommand` - when `true`, `/morph-compact` requires the Morph compaction path instead of silently falling back to Pi compaction
 
 Invalid routing mode strings automatically fall back to safe defaults:
 
@@ -157,43 +154,21 @@ Invalid routing mode strings automatically fall back to safe defaults:
 - `routing.codebaseSearchMode` -> `force`
 - `routing.githubSearchMode` -> `force`
 
-### Environment variable fallback
-
-If you still want env-based setup, these keys are supported:
-
-Add `baseUrl` in JSON config or `MORPH_BASE_URL` only when you want to override the default `https://api.morphllm.com` endpoint.
-
-- `MORPH_API_KEY` - Morph API key, or `multiple` to enable file-based key rotation
-- `MORPH_API_KEY_FILE` - optional path to a newline-delimited API key file for multi-key mode
-- `MORPH_API_KEY_STRATEGY` - `round-robin` or `random` for multi-key selection
-- `MORPH_BASE_URL` - optional custom Morph API base URL
-- `MORPH_BASE_API` - optional alias for custom Morph API base URL
-- `MORPH_EDIT` - set `false` to disable `morph_fastapply`
-- `MORPH_WARPGREP` - set `false` to disable local WarpGrep
-- `MORPH_WARPGREP_GITHUB` - set `false` to disable GitHub WarpGrep
-- `MORPH_AUTO_COMPACT` - set `false` to disable automatic Morph compaction while keeping `/morph-compact` available as an explicit Morph-only command
-- `MORPH_ALLOW_READONLY_AGENTS` - set `true` to allow `morph_fastapply` in readonly agents
-- `MORPH_AUTO_COMPACT_TOKEN_LIMIT` - optional fixed compaction trigger in tokens
-- `MORPH_AUTO_COMPACT_CONTEXT_THRESHOLD` - optional fraction of context window to trigger compaction
-- `MORPH_AUTO_COMPACT_PRESERVE_RECENT` - recent messages to keep uncompacted
-- `MORPH_AUTO_COMPACT_RATIO` - target compression ratio
-- `MORPH_TIMEOUT` - optional Fast Apply timeout in ms
-- `MORPH_WARPGREP_TIMEOUT` - optional WarpGrep timeout in ms
-- `MORPH_AUTO_COMPACT_TIMEOUT` - optional compaction timeout in ms
 
 ## Commands
 
-- `/morph_status` shows the loaded config path, API key status, SDK status, base URL, feature flags, routing mode state, and whether Morph-first guidance is active.
+- `/morph_status` shows the loaded config path, API key status, runs a live Morph API probe with the configured key, shows SDK status, base URL, feature flags, routing mode state, and whether Morph-first guidance is active.
 - `/morph_settings` opens a simple interactive menu for updating routing settings in `morph.json`.
 - Auto compaction is Morph-first when `autoCompactEnabled` is enabled: when Pi triggers compaction automatically, this plugin tries Morph compaction first and only falls back to Pi compaction if Morph is unavailable or cannot produce a result.
 - When `autoCompactEnabled` is `false`, automatic compaction skips Morph entirely and leaves compaction to Pi.
-- `/morph-compact` stays explicit and Morph-only: when `routing.forceMorphCompactCommand` is enabled, the manual command requires Morph compaction and surfaces an error if Morph cannot be used; when disabled, it runs normal Pi compaction with Morph auto-compaction rules.
+- `/morph-compact` stays explicit and Morph-only: the manual command always requires Morph compaction and surfaces an error if Morph cannot be used.
 
 Example `/morph_status` fields:
 
 - `Morph config: ~/.pi/agent/morph.json`
 - `Morph API key: configured`
 - `Morph API key source: single key`, `3 keys (round-robin)`, or `key file: ~/.pi/agent/morph.env` depending on your configuration
+- `Morph API live test: ok`, `failed (authentication error: ...)`, `failed (request timeout: ...)`, `failed (network/base URL error: ...)`, or `skipped (...)`
 - `Morph FastApply enabled: true`
 - `Auto compaction policy: Morph first, Pi fallback`
 - `Manual /morph-compact policy: Morph required`
@@ -204,7 +179,6 @@ Example `/morph_status` fields:
 - `Morph-first local search guidance active: true`
 - `Morph-first GitHub search guidance active: true`
 - `Fallback to native tools: true`
-- `Force /morph-compact: true`
 - `Manual /morph-compact` will fail loudly if Morph compaction is unavailable instead of silently using Pi compaction.
 
 `/morph_status` is the main summary view. Use `/morph_settings` when you want to change config interactively instead of editing JSON by hand. Reload the extension or session after credential or key-file changes so Morph clients are rebuilt with the new config. The footer also shows `MorphLLM` plus the loaded API key count, and includes the strategy when multiple keys are active.
@@ -247,7 +221,7 @@ This package uses Pi extension hooks rather than command aliases alone.
 - `model_select` tracks the active model context window.
 - `session_before_compact` runs Morph compaction before Pi falls back to its normal compactor, so automatic compaction stays Morph-first while preserving Pi as the safety net whenever `autoCompactEnabled` is on.
 - When `autoCompactEnabled` is off, `session_before_compact` skips Morph and leaves automatic compaction to Pi.
-- `/morph-compact` uses the same hook-based path, but when `routing.forceMorphCompactCommand` is enabled the manual command requires Morph compaction instead of silently falling back to Pi.
+- `/morph-compact` uses the same hook-based path and always requires Morph compaction instead of silently falling back to Pi.
 
 ## Development
 
@@ -268,11 +242,10 @@ Useful development modes:
 ## Notes
 
 - Default Morph endpoint is `https://api.morphllm.com`.
-- `MORPH_BASE_URL` takes precedence over the default endpoint.
-- `MORPH_BASE_API` is supported as a compatibility alias.
+- Set `baseUrl` or `baseApi` in JSON when you want a custom endpoint.
 - The package manifest in `package.json` allows Pi to auto-discover the extension and prompt resource.
 - Automatic config creation happens on first runtime load, not during `pi install`.
-- Automatic config creation only targets `MORPH_CONFIG` or the global `~/.pi/agent/morph.json` path, never a project-local file by default.
+- Automatic config creation only targets the global `~/.pi/agent/morph.json` path, never a project-local file by default.
 
 ## Testing
 
