@@ -345,6 +345,7 @@ test("extension still registers Morph tools without API key", async () => {
 	]);
 	assert.ok(pi.commands.has("morph_status"));
 	assert.ok(pi.commands.has("morph_settings"));
+	assert.ok(pi.commands.has("morph_selftest"));
 	assert.ok(pi.commands.has("morph-compact"));
 });
 
@@ -622,6 +623,32 @@ test("force search modes keep native search tools available", async () => {
 		{ cwd: process.cwd(), hasUI: false, ui: { notify() {} } },
 	);
 	assert.equal(nativeGithubSearch, undefined);
+});
+
+test("morph_selftest reports skipped checks without API key", async () => {
+	const extension = await loadExtension();
+	const pi = createFakePi();
+	await extension(pi);
+
+	const command = pi.commands.get("morph_selftest");
+	assert.ok(command);
+
+	const notifications = [];
+	await command.handler("", {
+		hasUI: true,
+		ui: {
+			notify(message, level) {
+				notifications.push({ message, level });
+			},
+		},
+	});
+
+	assert.equal(notifications[0].message, "Running Morph self-test...");
+	assert.match(notifications[1].message, /API probe: skipped \(missing API key\)/);
+	assert.match(notifications[1].message, /FastApply: skipped \(Morph client unavailable\)/);
+	assert.match(notifications[1].message, /WarpGrep local: skipped \(WarpGrep client unavailable\)/);
+	assert.match(notifications[1].message, /WarpGrep GitHub: skipped \(WarpGrep client unavailable\)/);
+	assert.match(notifications[1].message, /Compact: skipped \(Compact client unavailable\)/);
 });
 
 test("morph_settings updates routing config through interactive flow", async () => {
