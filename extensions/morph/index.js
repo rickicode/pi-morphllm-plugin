@@ -28,7 +28,7 @@ import {
 	normalizeCodeEditInput,
 } from "./utils.js";
 
-const PLUGIN_VERSION = "0.1.4";
+const PLUGIN_VERSION = "0.1.5";
 
 function createApiKeySelector(config) {
 	const apiKeys = config.apiKeys || [];
@@ -796,31 +796,42 @@ function shouldForceGithubSearch(config) {
 
 function createMorphCompactHandler(forceMorphCompactRef, strictMorphCompactRef) {
 	return async (_args, ctx) => {
-		forceMorphCompactRef.value = true;
-		strictMorphCompactRef.value = true;
-		ctx.compact({
-			onComplete: (result) => {
-				forceMorphCompactRef.value = false;
-				strictMorphCompactRef.value = false;
-				if (!ctx.hasUI) return;
-				const summary = result.summary || "Compaction finished.";
+		try {
+			forceMorphCompactRef.value = true;
+			strictMorphCompactRef.value = true;
+			await ctx.compact({
+				onComplete: (result) => {
+					forceMorphCompactRef.value = false;
+					strictMorphCompactRef.value = false;
+					if (!ctx.hasUI) return;
+					const summary = result.summary || "Compaction finished.";
+					ctx.ui.notify(
+						`Morph compact complete: ${summary.slice(0, 240)}`,
+						"info",
+					);
+				},
+				onError: (error) => {
+					forceMorphCompactRef.value = false;
+					strictMorphCompactRef.value = false;
+					if (!ctx.hasUI) return;
+					ctx.ui.notify(`Morph compact failed: ${error.message}`, "warning");
+				},
+			});
+			if (ctx.hasUI) {
 				ctx.ui.notify(
-					`Morph compact complete: ${summary.slice(0, 240)}`,
+					"Triggered Morph compaction for the current session.",
 					"info",
 				);
-			},
-			onError: (error) => {
-				forceMorphCompactRef.value = false;
-				strictMorphCompactRef.value = false;
-				if (!ctx.hasUI) return;
-				ctx.ui.notify(`Morph compact failed: ${error.message}`, "warning");
-			},
-		});
-		if (ctx.hasUI) {
-			ctx.ui.notify(
-				"Triggered Morph compaction for the current session.",
-				"info",
-			);
+			}
+		} catch (error) {
+			forceMorphCompactRef.value = false;
+			strictMorphCompactRef.value = false;
+			if (ctx.hasUI) {
+				ctx.ui.notify(
+					`Morph compact skipped: ${error.message}`,
+					"warning",
+				);
+			}
 		}
 	};
 }

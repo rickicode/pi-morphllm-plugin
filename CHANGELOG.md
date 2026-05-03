@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-03
+
+### Changed
+- Added plugin version output to `/morph_status` so the active Morph plugin build is visible in the status summary.
+- Added `/morph_selftest` to run real end-to-end checks for the Morph API probe, FastApply, local WarpGrep, GitHub WarpGrep, and compact using temporary files and sample queries.
+- Tightened the GitHub self-test so it now requires actual `package.json` metadata to be found instead of treating any successful response as a pass.
+- Bumped the package and internal plugin version to `0.1.5`.
+
 ## [0.1.4] - 2026-05-03
 
 ### Changed

@@ -217,7 +217,7 @@ test("morph_status reports live API probe result", async () => {
 		});
 
 		assert.equal(notifications[0].message, "Running Morph API live test...");
-		assert.match(notifications[1].message, /Morph plugin version: 0\.1\.4/);
+		assert.match(notifications[1].message, /Morph plugin version: 0\.1\.5/);
 		assert.match(notifications[1].message, /Morph API live test: ok/);
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -405,7 +405,7 @@ test("morph-compact command triggers ctx.compact", async () => {
 	let called = 0;
 	const ctx = {
 		hasUI: false,
-		compact(options) {
+		async compact(options) {
 			called += 1;
 			assert.equal(typeof options?.onComplete, "function");
 			assert.equal(typeof options?.onError, "function");
@@ -416,6 +416,40 @@ test("morph-compact command triggers ctx.compact", async () => {
 	await command.handler("", ctx);
 
 	assert.equal(called, 1);
+});
+
+test("morph-compact command reports compact errors without throwing", async () => {
+	const extension = await loadExtension();
+	const pi = createFakePi();
+	await extension(pi);
+
+	const command = pi.commands.get("morph-compact");
+	assert.ok(command);
+
+	const notifications = [];
+	await assert.doesNotReject(() =>
+		command.handler("", {
+			hasUI: true,
+			async compact() {
+				throw new Error(
+					"There are no older messages available to compact after preserving recent context.",
+				);
+			},
+			ui: {
+				notify(message, level) {
+					notifications.push({ message, level });
+				},
+			},
+		}),
+	);
+
+	assert.deepEqual(notifications, [
+		{
+			message:
+				"Morph compact skipped: There are no older messages available to compact after preserving recent context.",
+			level: "warning",
+		},
+	]);
 });
 
 test("morph-compact requires Morph compaction instead of silently falling back", async () => {
